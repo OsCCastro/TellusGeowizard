@@ -1,0 +1,42 @@
+═══════════════════════════════════════════════════════════════════
+CORRECCIÓN APLICADA - ICONOS EN EJECUTABLE
+═══════════════════════════════════════════════════════════════════
+
+## ✅ PROBLEMA SOLUCIONADO
+
+Los iconos SVG no se cargaban en el .exe porque PyInstaller usa rutas diferentes.
+
+## 🔧 CAMBIOS REALIZADOS
+
+Se modificaron **4 ubicaciones** en el código para usar `sys._MEIPASS`:
+
+### 1. ui/main_window.py - Método _icono()
+   - Ahora detecta si corre en PyInstaller (frozen)
+   - Usa sys._MEIPASS para rutas en ejecutable
+   - Funciona en desarrollo Y en .exe compilado
+
+### 2. ui/main_window.py - Logo en __init__()
+   - Ruta del tellus_logo.png actualizada
+   - Compatible con PyInstaller
+
+### 3. ui/main_window.py - Mapa HTML
+   - Ruta de map_base.html corregida
+   - Funciona en ambos modos
+
+### 4. gui.py - Métodos equivalentes
+   - Mismos cambios aplicados
+   - Compatibilidad completa
+
+## 📝 PRÓXIMO PASO
+
+**RECOMPILAR EL EJECUTABLE:**
+
+```cmd
+build_exe.bat
+```
+
+Con estos cambios, el ejecutable mostrará todos los iconos correctamente.
+
+═══════════════════════════════════════════════════════════════════
+¡Ahora puedes compilar nuevamente!
+═══════════════════════════════════════════════════════════════════

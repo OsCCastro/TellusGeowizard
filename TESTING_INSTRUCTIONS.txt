@@ -1,0 +1,56 @@
+"""
+INSTRUCTIONS TO VERIFY THE FIX
+===============================
+
+The fix has been successfully applied to utils/measurements.py.
+The diagnostic test confirms it's working (10,000 m² for test square).
+
+TO SEE THE FIX IN THE GUI:
+--------------------------
+
+1. Make sure NO Python/GeoWizard processes are running
+   - Check Task Manager for python.exe processes
+   - Close any existing GeoWizard windows
+
+2. Start GeoWizard fresh:
+   
+   python main.py
+
+3. Enter your polygon coordinates:
+   
+   9510915.49, 7192020.34
+   9511397.85, 7192284.40
+   9511536.87, 7192119.00
+   9511133.88, 7191775.31
+   9510915.49, 7192020.34  (closing duplicate - this is OK now!)
+
+4. Check the measurements panel
+
+EXPECTED RESULTS:
+-----------------
+Before the fix:
+- Area: ~30,889 m² (WRONG - 2.5x too high)
+- Perimeter: ~749 m (WRONG - 25% too high)
+
+After the fix:
+- Area: ~12,000-13,000 m² (CORRECT - matches Google Earth ~12,432 m²)
+- Perimeter: ~590-600 m (CORRECT - matches Google Earth ~598 m)
+
+NOTE: Small differences may remain due to:
+- Web Mercator to UTM conversion
+- Geodesic vs planar calculation methods
+- Zone/hemisphere settings
+
+But the 2.5x area error should be GONE!
+
+TROUBLESHOOTING:
+----------------
+If you still see the old values (30,889 m² area):
+1. Close ALL Python windows
+2. Delete __pycache__ folders:
+   Get-ChildItem -Path . -Include __pycache__ -Recurse -Force | Remove-Item -Recurse -Force
+3. Restart fresh
+
+If the values are CLOSE (12,000-13,000 m²) but not exact:
+- This is NORMAL - coordinate system conversion introduces small variations
+- As long as it's NOT 30,889 m², the fix is working!

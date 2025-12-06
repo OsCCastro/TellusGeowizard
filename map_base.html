@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoWizard Base Map</title>
+    <style>
+        html,
+        body,
+        #map {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            z-index: 9999;
+            text-align: center;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Measurement Panel Overlay */
+        #measure-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 10px;
+            z-index: 1000;
+            /* High z-index to stay on top */
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            min-width: 150px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .measure-title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 5px;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 3px;
+        }
+
+        .measure-item {
+            margin-bottom: 2px;
+            color: #444;
+        }
+
+        /* Company Logo Overlay */
+        #company-logo {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background-color: transparent;
+            pointer-events: none;
+        }
+
+        #company-logo img {
+            width: 120px;
+            height: auto;
+            display: block;
+            opacity: 0.9;
+        }
+    </style>
+    <!-- QWebChannel for Qt communication -->
+    <script type="text/javascript" src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <script type="text/javascript">
+        // Initialize QWebChannel to communicate with Python
+        // IMPORTANT: Expose pyBridge globally so event handlers can access it
+        window.pyBridge = null;
+
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            window.pyBridge = channel.objects.pyBridge;
+            console.log('QWebChannel initialized, pyBridge available:', window.pyBridge !== null);
+
+            if (window.pyBridge) {
+                console.log('pyBridge methods:', Object.keys(window.pyBridge));
+            }
+        });
+    </script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>Cargando mapa base...</div>
+    </div>
+
+    <!-- Measurement Panel Overlay -->
+    <div id="measure-panel">
+        <div class="measure-title">📏 Mediciones</div>
+        <div id="measure-distance" class="measure-item">Distancia: --</div>
+        <div id="measure-area" class="measure-item">Área: --</div>
+        <div id="measure-perimeter" class="measure-item">Perímetro: --</div>
+    </div>
+
+    <!-- Company Logo Overlay -->
+    <div id="company-logo">
+        <img src="icons/tellus_logo.png" alt="Tellus Consultoría">
+    </div>
+
+    <div id="map"></div>
+    <script>
+        // Hide loading indicator after map loads
+        function hideLoading() {
+            var loading = document.getElementById('loading');
+            if (loading) {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // Create the Leaflet map
+        var map = L.map('map', {
+            zoomControl: true,
+            attributionControl: true
+        }).setView([0, 0], 2);
+
+        // Load OpenStreetMap tiles over HTTPS
+        var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            subdomains: ['a', 'b', 'c'],
+            maxZoom: 19,
+            minZoom: 1,
+            tileSize: 256,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        // Handle tile loading events
+        var tilesLoaded = 0;
+        var tilesLoading = 0;
+
+        osm.on('loading', function () {
+            tilesLoading++;
+        });
+
+        osm.on('load', function () {
+            tilesLoaded++;
+            if (tilesLoaded >= 1) {
+                hideLoading();
+            }
+        });
+
+        // Retry loading a tile if it fails
+        osm.on('tileerror', function (e) {
+            var tile = e.tile;
+            var src = tile.src;
+            var retries = parseInt(tile.getAttribute('data-retries') || '0');
+
+            if (retries < 3) {
+                retries++;
+                tile.setAttribute('data-retries', retries.toString());
+                setTimeout(function () {
+                    tile.src = src.split('?')[0] + '?retry=' + retries;
+                }, 500 * retries);
+            } else {
+                console.warn('Failed to load tile after 3 retries:', src);
+            }
+        });
+
+        osm.addTo(map);
+
+        // Add scale control
+        L.control.scale({
+            metric: true,
+            imperial: false,
+            position: 'bottomright' // Moved to bottomright to avoid conflict with panel
+        }).addTo(map);
+
+        // Hide loading after timeout even if tiles don't load
+        setTimeout(hideLoading, 5000);
+
+        // Global flag for edit mode
+        var isEditable = false;
+
+        // Layer that will hold all features sent from Python
+        var geoLayer = L.geoJSON(null, {
+            style: function (feature) {
+                return {
+                    color: '#0000ff',
+                    weight: 2,
+                    opacity: 0.7,
+                    fillOpacity: 0.2
+                };
+            },
+            pointToLayer: function (feature, latlng) {
+                // Use a marker for points to allow dragging
+                var marker = L.marker(latlng, {
+                    draggable: isEditable, // Set initial state based on global flag
+                    icon: L.divIcon({
+                        className: 'custom-div-icon',
+                        html: "<div style='background-color:#ff0000; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff;'></div>",
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    })
+                });
+
+                // Handle drag events
+                marker.on('dragstart', function (event) {
+                    var marker = event.target;
+                    var position = marker.getLatLng();
+                    var id = feature.properties.id;
+
+                    // Notify Python that drag started
+                    if (window.pyBridge && window.pyBridge.onDragStart) {
+                        window.pyBridge.onDragStart(id, position.lat, position.lng);
+                    } else {
+                        console.log('GEOWIZARD:drag_start:' + id + ':' + position.lat + ':' + position.lng);
+                    }
+                });
+
+                marker.on('drag', function (event) {
+                    var marker = event.target;
+                    var position = marker.getLatLng();
+                    var id = feature.properties.id;
+
+                    // Notify Python during drag for live table updates
+                    if (window.pyBridge && window.pyBridge.onDrag) {
+                        window.pyBridge.onDrag(id, position.lat, position.lng);
+                    }
+
+                    // Update polygon/polyline vertices in real-time for visual feedback
+                    updatePolygonVertices(id, position.lat, position.lng);
+                });
+
+                marker.on('dragend', function (event) {
+                    var marker = event.target;
+                    var position = marker.getLatLng();
+                    var id = feature.properties.id;
+
+                    // Notify Python to update table and measurements
+                    if (window.pyBridge && window.pyBridge.onDragEnd) {
+                        window.pyBridge.onDragEnd(id, position.lat, position.lng);
+                    } else {
+                        console.log('GEOWIZARD:update_point_live:' + id + ':' + position.lat + ':' + position.lng);
+                        setTimeout(function () {
+                            console.log('GEOWIZARD:drag_end:' + id + ':' + position.lat + ':' + position.lng);
+                        }, 50);
+                    }
+                });
+
+                return marker;
+            },
+            onEachFeature: function (feature, layer) {
+                if (feature.properties && feature.properties.id) {
+                    layer.bindPopup('ID: ' + feature.properties.id);
+                }
+            }
+        }).addTo(map);
+
+        // Helper function to update polygon/polyline vertices during drag
+        function updatePolygonVertices(pointId, newLat, newLng) {
+            geoLayer.eachLayer(function (layer) {
+                if (layer instanceof L.Polygon || layer instanceof L.Polyline) {
+                    // Get current coordinates
+                    var latlngs = layer.getLatLngs();
+
+                    // For polygons, latlngs is an array of arrays
+                    if (layer instanceof L.Polygon) {
+                        latlngs = latlngs[0];
+                    }
+
+                    // Find and update the vertex matching this point ID
+                    // Point ID corresponds to the index in the coordinates array (1-based)
+                    var vertexIndex = parseInt(pointId) - 1;
+
+                    if (vertexIndex >= 0 && vertexIndex < latlngs.length) {
+                        latlngs[vertexIndex] = L.latLng(newLat, newLng);
+
+                        // Update the layer with new coordinates
+                        if (layer instanceof L.Polygon) {
+                            layer.setLatLngs([latlngs]);
+                        } else {
+                            layer.setLatLngs(latlngs);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Enable/Disable editing (called from Python)
+        window.setEditable = function (editable) {
+            isEditable = editable;
+            geoLayer.eachLayer(function (layer) {
+                if (layer instanceof L.Marker) {
+                    if (layer.dragging) {
+                        if (editable) {
+                            layer.dragging.enable();
+                        } else {
+                            layer.dragging.disable();
+                        }
+                    }
+                }
+            });
+            return true;
+        };
+
+        // Add a GeoJSON feature or feature collection to the map
+        window.addFeature = function (geojsonData) {
+            try {
+                var data = (typeof geojsonData === 'string') ? JSON.parse(geojsonData) : geojsonData;
+                geoLayer.addData(data);
+
+                // Fit map to feature bounds if features exist
+                if (geoLayer.getLayers().length > 0) {
+                    var bounds = geoLayer.getBounds();
+                    if (bounds.isValid()) {
+                        map.fitBounds(bounds, { padding: [50, 50] });
+                    }
+                }
+
+                return true;
+            } catch (e) {
+                console.error('Error adding feature:', e);
+                return false;
+            }
+        };
+
+        // Remove all currently displayed features
+        window.clearFeatures = function () {
+            geoLayer.clearLayers();
+            return true;
+        };
+
+        // Center map on coordinates
+        window.centerMap = function (lat, lon, zoom) {
+            zoom = zoom || 13;
+            map.setView([lat, lon], zoom);
+            return true;
+        };
+
+        // Update measurement panel
+        window.updateMeasurements = function (distanceText, areaText, perimeterText) {
+            document.getElementById('measure-distance').innerHTML = distanceText;
+            document.getElementById('measure-area').innerHTML = areaText;
+            document.getElementById('measure-perimeter').innerHTML = perimeterText;
+        };
+
+        // Toggle basemap visibility
+        window.toggleBasemap = function (visible) {
+            if (visible) {
+                if (!map.hasLayer(osm)) {
+                    map.addLayer(osm);
+                }
+            } else {
+                if (map.hasLayer(osm)) {
+                    map.removeLayer(osm);
+                }
+            }
+        };
+
+        // Add vertex by click mode
+        var addVertexClickHandler = null;
+
+        window.enableAddVertexMode = function (enabled) {
+            if (enabled) {
+                // Enable click to add vertex
+                addVertexClickHandler = function (e) {
+                    var lat = e.latlng.lat;
+                    var lng = e.latlng.lng;
+
+                    // Notify Python of new vertex location
+                    console.log('GEOWIZARD:add_vertex_at::' + lat + ':' + lng);
+                };
+
+                map.on('click', addVertexClickHandler);
+                map.getContainer().style.cursor = 'crosshair';
+                console.log('Add vertex mode enabled');
+            } else {
+                // Disable click to add vertex
+                if (addVertexClickHandler) {
+                    map.off('click', addVertexClickHandler);
+                    addVertexClickHandler = null;
+                }
+                map.getContainer().style.cursor = '';
+                console.log('Add vertex mode disabled');
+            }
+        };
+
+        // Enable/disable marker dragging for edit mode
+        var editableMarkers = [];
+
+        window.setEditable = function (enabled) {
+            console.log('setEditable called with:', enabled);
+
+            // Update global flag
+            isEditable = enabled;
+
+            // Find all markers in the geoLayer and enable/disable dragging
+            geoLayer.eachLayer(function (layer) {
+                if (layer instanceof L.Marker) {
+                    var markerId = layer.feature ? layer.feature.properties.id : 'unknown';
+
+                    if (enabled) {
+                        // Enable dragging - need to set the draggable option
+                        layer.options.draggable = true;
+                        if (layer.dragging) {
+                            layer.dragging.enable();
+                        }
+                        editableMarkers.push(layer);
+                        console.log('Enabled dragging for marker:', markerId);
+                    } else {
+                        // Disable dragging
+                        layer.options.draggable = false;
+                        if (layer.dragging) {
+                            layer.dragging.disable();
+                        }
+                        console.log('Disabled dragging for marker:', markerId);
+                    }
+                }
+            });
+
+            if (!enabled) {
+                editableMarkers = [];
+            }
+
+            console.log('Edit mode is now:', isEditable ? 'ENABLED' : 'DISABLED');
+        };
+
+        // Log that the map is ready
+        console.log('GeoWizard base map initialized');
+    </script>
+</body>
+
+</html>

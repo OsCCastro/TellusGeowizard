@@ -1,3 +1,4 @@
+import csv
 import logging
 from core.exceptions import FileImportError, InsufficientDataError
 from utils.logger import get_logger

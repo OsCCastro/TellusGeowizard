@@ -7,7 +7,7 @@ from pyproj import Transformer
 
 class KMZExporter:
     @staticmethod
-    def _generate_kml_string(features: list[dict], hemisphere: str, zone: str) -> str:
+    def _generate_kml_string(features: list[dict], hemisphere: str, zone: str, html_dict: dict[int, str] = None) -> str:
         # Esta lógica es una copia adaptada de KMLExporter.export,
         # pero devuelve el string KML en lugar de escribir a archivo.
         # Se podría refactorizar KMLExporter para exponer esta lógica.
@@ -34,16 +34,23 @@ class KMZExporter:
             pm = SubElement(doc, "Placemark")
             SubElement(pm, "name").text = str(feat.get("id", "SinID")) # Usar .get con default
 
-            # Descripción UTM
-            # Asegurarse de que coords no esté vacío antes de acceder a coords[0]
-            x0, y0 = feat["coords"][0]
-            desc_text = (
-                f"Zona: {zone} ({hemisphere})\n"
-                f"Este: {x0:.2f} m\n"
-                f"Norte: {y0:.2f} m"
-            )
-            desc = SubElement(pm, "description")
-            desc.text = f"<![CDATA[{desc_text}]]>"
+            feat_id = feat.get("id")
+            
+            # Decidir qué descripción usar: HTML personalizado o UTM por defecto
+            if html_dict and feat_id in html_dict and html_dict[feat_id]:
+                # Usar HTML personalizado - el HTML se inserta directamente
+                desc = SubElement(pm, "description")
+                desc.text = html_dict[feat_id]
+            else:
+                # Descripción UTM por defecto
+                x0, y0 = feat["coords"][0]
+                desc_text = (
+                    f"Zona: {zone} ({hemisphere})\n"
+                    f"Este: {x0:.2f} m\n"
+                    f"Norte: {y0:.2f} m"
+                )
+                desc = SubElement(pm, "description")
+                desc.text = desc_text
 
             geom_type = feat.get("type")
 
@@ -85,7 +92,7 @@ class KMZExporter:
         return parsed_xml.toprettyxml(indent="  ") # Devuelve string (UTF-8 por defecto en Python 3)
 
     @staticmethod
-    def export(features: list[dict], filename: str, hemisphere: str, zone: str):
+    def export(features: list[dict], filename: str, hemisphere: str, zone: str, html_dict: dict[int, str] = None):
         if not features:
             raise ValueError("No hay geometrías para exportar.")
 
@@ -94,7 +101,7 @@ class KMZExporter:
 
         try:
             # Generar el contenido KML como string
-            kml_content_str = KMZExporter._generate_kml_string(features, hemisphere, zone)
+            kml_content_str = KMZExporter._generate_kml_string(features, hemisphere, zone, html_dict)
 
             # El KML string debe ser encodeado a bytes para escribir en el archivo zip
             kml_content_bytes = kml_content_str.encode('utf-8')

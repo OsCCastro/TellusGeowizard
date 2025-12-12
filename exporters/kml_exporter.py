@@ -79,13 +79,12 @@ class KMLExporter:
                 pm = SubElement(doc, "Placemark")
                 SubElement(pm, "name").text = str(feat_id)
 
-                # Decidir qué descripción (CDATA) usar: HTML personalizado o UTM por defecto
+                # Decidir qué descripción usar: HTML personalizado o UTM por defecto
                 if feat_id in html_dict and html_dict[feat_id]:
-                    # Si existe HTML en el diccionario, lo incrustamos en CDATA
+                    # Si existe HTML en el diccionario, lo incrustamos directamente
                     raw_html = html_dict[feat_id]
                     desc = SubElement(pm, "description")
-                    # Asegurarse de que el string HTML esté completo (<table>…</table>, etc.)
-                    desc.text = f"<![CDATA[{raw_html}]]>"
+                    desc.text = raw_html
                 else:
                     # Si no hay HTML, generamos descripción UTM simple con coords[0]
                     x0, y0 = coords[0]
@@ -95,7 +94,7 @@ class KMLExporter:
                         f"Norte: {y0:.2f} m"
                     )
                     desc = SubElement(pm, "description")
-                    desc.text = f"<![CDATA[{desc_text}]]>"
+                    desc.text = desc_text
 
                 # Ahora construir la geometría en WGS84 (lon,lat,0)
                 if geom_type == "Punto" or geom_type == "Point":

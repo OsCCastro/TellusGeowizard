@@ -77,7 +77,8 @@ class CoordinateManager:
         self.features.append({
             "id":   fid,
             "type": geom_type,
-            "coords": coords
+            "coords": coords,
+            "curves": []  # Lista de curvas asociadas (se llenará si hay)
         })
 
     def clear(self):

@@ -126,10 +126,186 @@ class UTMDelegate(QStyledItemDelegate):
             model.setData(index, QBrush(color), Qt.ForegroundRole)
 
 class CoordTable(QTableWidget):
+    """Extended table widget with support for expandable curve parameters."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Track curve data: {main_row_index: {'delta': '...', 'radio': '...', 'centro': '...'}}
+        self.curve_data = {}
+        # Track which rows are expanded
+        self.expanded_rows = set()
+        # Track which rows are curve type (even if collapsed)
+        self.curve_rows = set()
+        # Default number of intermediate points for densification
+        self.curve_densification_points = 15  # Default: 10-20 range
+        
+    def mark_as_curve(self, row):
+        """
+        Marca una fila como curva y agrega sub-filas para parámetros.
+        
+        Args:
+            row: Índice de la fila a convertir en curva
+        """
+        if row in self.curve_rows:
+            return  # Ya es una curva
+        
+        # Insertar 3 sub-filas debajo de la fila principal
+        for i in range(3):
+            self.insertRow(row + i + 1)
+        
+        # Configurar sub-filas con títulos (sin símbolo →)
+        self._setup_subrow(row + 1, "DELTA", "")
+        self._setup_subrow(row + 2, "RADIO", "")
+        self._setup_subrow(row + 3, "CENTRO", "")
+        
+        # Agregar botón de expansión en la columna ID
+        expand_btn = QPushButton("▼")
+        expand_btn.setMaximumWidth(30)
+        expand_btn.setStyleSheet("border: none; background: transparent; font-size: 12pt;")
+        expand_btn.clicked.connect(lambda: self.toggle_expansion(row))
+        
+        # Guardar el contenido original del ID
+        id_item = self.item(row, 0)
+        if id_item:
+            expand_btn.setToolTip(f"ID: {id_item.text()}")
+            # Reemplazar con botón
+            self.setCellWidget(row, 0, expand_btn)
+        
+        # Marcar como curva y expandida
+        self.curve_rows.add(row)
+        self.expanded_rows.add(row)
+        
+        # Cambiar color de fondo de la fila principal
+        for col in range(self.columnCount()):
+            item = self.item(row, col)
+            if item:
+                item.setBackground(QColor(220, 240, 255))  # Azul claro
+    
+    def _setup_subrow(self, row, label, value):
+        """
+        Configura una sub-fila con título y valor editable.
+        
+        Args:
+            row: Índice de la sub-fila
+            label: Etiqueta (DELTA, RADIO, CENTRO)
+            value: Valor inicial
+        """
+        # Columna 0 (ID): Label (no editable)
+        label_item = QTableWidgetItem(label)
+        label_item.setFlags(Qt.ItemIsEnabled)
+        label_item.setBackground(QColor(245, 245, 245))  # Gris claro
+        label_item.setFont(QFont("Arial", 9, QFont.Bold))
+        self.setItem(row, 0, label_item)
+        
+        # Columna 1 (X): Valor (editable)
+        value_item = QTableWidgetItem(value)
+        value_item.setBackground(QColor(245, 245, 245))
+        self.setItem(row, 1, value_item)
+        
+        # Columna 2 (Y): Vacía (no editable)
+        empty_item = QTableWidgetItem("")
+        empty_item.setFlags(Qt.ItemIsEnabled)
+        empty_item.setBackground(QColor(245, 245, 245))
+        self.setItem(row, 2, empty_item)
+    
+    def toggle_expansion(self, row):
+        """
+        Colapsa/expande las sub-filas de una curva.
+        
+        Args:
+            row: Índice de la fila principal (curva)
+        """
+        if row not in self.curve_rows:
+            return  # No es una curva
+        
+        btn = self.cellWidget(row, 0)
+        if not btn:
+            return
+        
+        if row in self.expanded_rows:
+            # Colapsar: ocultar sub-filas
+            self.setRowHidden(row + 1, True)
+            self.setRowHidden(row + 2, True)
+            self.setRowHidden(row + 3, True)
+            self.expanded_rows.remove(row)
+            btn.setText("►")
+        else:
+            # Expandir: mostrar sub-filas
+            self.setRowHidden(row + 1, False)
+            self.setRowHidden(row + 2, False)
+            self.setRowHidden(row + 3, False)
+            self.expanded_rows.add(row)
+            btn.setText("▼")
+    
+    def convert_to_point(self, row):
+        """
+        Convierte una fila de curva a punto normal.
+        
+        Args:
+            row: Índice de la fila a convertir
+        """
+        if row not in self.curve_rows:
+            return  # Ya es un punto
+        
+        # Remover sub-filas
+        for i in range(3):
+            self.removeRow(row + 1)
+        
+        # Restaurar celda de ID
+        btn = self.cellWidget(row, 0)
+        if btn:
+            # Obtener ID del tooltip
+            id_text = btn.toolTip().replace("ID: ", "")
+            self.removeCellWidget(row, 0)
+            id_item = QTableWidgetItem(id_text)
+            id_item.setFlags(Qt.ItemIsEnabled)
+            self.setItem(row, 0, id_item)
+        
+        # Restaurar color de fondo normal
+        for col in range(self.columnCount()):
+            item = self.item(row, col)
+            if item:
+                item.setBackground(QColor(255, 255, 255))  # Blanco
+        
+        # Remover de conjuntos de seguimiento
+        self.curve_rows.discard(row)
+        self.expanded_rows.discard(row)
+        if row in self.curve_data:
+            del self.curve_data[row]
+    
+    def get_curve_parameters(self, row):
+        """
+        Obtiene los parámetros de curva de una fila.
+        
+        Args:
+            row: Índice de la fila principal (curva)
+        
+        Returns:
+            dict con keys: 'delta', 'radio', 'centro' (o None si no es curva)
+        """
+        if row not in self.curve_rows:
+            return None
+        
+        delta_item = self.item(row + 1, 1)
+        radio_item = self.item(row + 2, 1)
+        centro_item = self.item(row + 3, 1)
+        
+        return {
+            'delta': delta_item.text() if delta_item else "",
+            'radio': radio_item.text() if radio_item else "",
+            'centro': centro_item.text() if centro_item else ""
+        }
+    
     def keyPressEvent(self, event):
         # Tab: al salir de Y, saltar a X de la siguiente fila
         if event.key() == Qt.Key_Tab and self.currentColumn() == 2:
-            next_row = self.currentRow() + 1
+            current_row = self.currentRow()
+            next_row = current_row + 1
+            
+            # Si la siguiente fila es una sub-fila de curva, saltarla
+            while next_row < self.rowCount() and self.isRowHidden(next_row):
+                next_row += 1
+            
             if next_row < self.rowCount():
                 self.setCurrentCell(next_row, 1)
                 # Comenzar edición inmediatamente
@@ -760,6 +936,30 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
         menu.addAction("Copiar", self._copy_selection)
         menu.addAction("Pegar", self._paste_to_table)
+        menu.addSeparator()
+        
+        # Nuevo submenú: Tipo de vértice
+        vertex_type_menu = menu.addMenu("Tipo de vértice")
+        
+        current_row = self.table.currentRow()
+        is_curve = current_row in self.table.curve_rows
+        
+        # Opciones con checkmark
+        punto_action = vertex_type_menu.addAction("Punto")
+        curva_action = vertex_type_menu.addAction("Curva")
+        
+        # Marcar la opción actual
+        if is_curve:
+            curva_action.setCheckable(True)
+            curva_action.setChecked(True)
+        else:
+            punto_action.setCheckable(True)
+            punto_action.setChecked(True)
+        
+        # Conectar acciones
+        punto_action.triggered.connect(lambda: self._convert_to_point(current_row))
+        curva_action.triggered.connect(lambda: self._convert_to_curve(current_row))
+        
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _copy_selection(self):
@@ -775,6 +975,28 @@ class MainWindow(QMainWindow):
                     parts.append(itm.text() if itm else "")
                 text += "\t".join(parts) + "\n"
         QApplication.clipboard().setText(text)
+
+    def _convert_to_curve(self, row):
+        """Convierte una fila a tipo curva."""
+        if row >= 0:
+            self.table.mark_as_curve(row)
+            # Refresh preview após conversión
+            try:
+                mgr = self._build_manager_from_table()
+                self._redraw_scene(mgr)
+            except (ValueError, TypeError) as e:
+                print(f"Error al construir features para preview: {e}")
+    
+    def _convert_to_point(self, row):
+        """Convierte una fila a tipo punto."""
+        if row >= 0:
+            self.table.convert_to_point(row)
+            # Refresh preview after conversion
+            try:
+                mgr = self._build_manager_from_table()
+                self._redraw_scene(mgr)
+            except (ValueError, TypeError) as e:
+                print(f"Error al construir features para preview: {e}")
 
     def _add_row(self):
         r = self.table.rowCount()
@@ -885,55 +1107,133 @@ class MainWindow(QMainWindow):
         hemisphere = self.cb_hemisferio.currentText()
         
         for r in range(self.table.rowCount()):
-            xi = self.table.item(r, 1)
-            yi = self.table.item(r, 2)
-            if xi and yi and xi.text().strip() and yi.text().strip():
-                try:
-                    x_str = xi.text().strip()
-                    y_str = yi.text().strip()
-                    
-                    # Convert coordinates to UTM based on current system
-                    if cs_text == "UTM":
-                        # Already in UTM
-                        x_val = float(x_str)
-                        y_val = float(y_str)
-                        coords.append((x_val, y_val))
+            # Skip hidden rows (curve sub-rows)
+            if self.table.isRowHidden(r):
+                continue
+            
+            # Check if this is a curve row
+            if r in self.table.curve_rows:
+                # Process curve: get main coordinate and curve parameters
+                xi = self.table.item(r, 1)
+                yi = self.table.item(r, 2)
+                
+                if xi and yi and xi.text().strip() and yi.text().strip():
+                    try:
+                        x_str = xi.text().strip()
+                        y_str = yi.text().strip()
                         
-                    elif cs_text == "Geographic (Decimal Degrees)":
-                        # Convert DD to UTM
-                        lon = float(x_str)
-                        lat = float(y_str)
-                        utm_epsg = get_utm_epsg(zone, hemisphere)
-                        transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
-                        x_utm, y_utm = transformer.transform(lon, lat)
-                        coords.append((x_utm, y_utm))
+                        # Convert start point to UTM
+                        start_point_utm = None
+                        if cs_text == "UTM":
+                            start_point_utm = (float(x_str), float(y_str))
+                        elif cs_text == "Geographic (Decimal Degrees)":
+                            lon, lat = float(x_str), float(y_str)
+                            utm_epsg = get_utm_epsg(zone, hemisphere)
+                            transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
+                            start_point_utm = transformer.transform(lon, lat)
+                        elif cs_text == "Geographic (DMS)":
+                            is_valid_lon, lon = validate_dms_coordinate(x_str, is_longitude=True)
+                            is_valid_lat, lat = validate_dms_coordinate(y_str, is_longitude=False)
+                            if is_valid_lon and is_valid_lat:
+                                utm_epsg = get_utm_epsg(zone, hemisphere)
+                                transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
+                                start_point_utm = transformer.transform(lon, lat)
+                        elif cs_text == "Web Mercator":
+                            x_m, y_m = float(x_str), float(y_str)
+                            t1 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+                            lon, lat = t1.transform(x_m, y_m)
+                            utm_epsg = get_utm_epsg(zone, hemisphere)
+                            t2 = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
+                            start_point_utm = t2.transform(lon, lat)
                         
-                    elif cs_text == "Geographic (DMS)":
-                        # Parse DMS and convert to UTM
-                        is_valid_lon, lon = validate_dms_coordinate(x_str, is_longitude=True)
-                        is_valid_lat, lat = validate_dms_coordinate(y_str, is_longitude=False)
-                        if is_valid_lon and is_valid_lat:
+                        if start_point_utm:
+                            # Get curve parameters
+                            params = self.table.get_curve_parameters(r)
+                            if params and params['delta'] and params['radio'] and params['centro']:
+                                from core.curve_geometry import CurveSegment
+                                
+                                # Parse centro (format: "X, Y")
+                                centro_str = params['centro'].replace(',', ' ').split()
+                                if len(centro_str) >= 2:
+                                    centro_utm = (float(centro_str[0]), float(centro_str[1]))
+                                    
+                                    # Create curve segment
+                                    curve = CurveSegment(
+                                        start_point=start_point_utm,
+                                        center=centro_utm,
+                                        delta=params['delta'],
+                                        radius=float(params['radio'])
+                                    )
+                                    
+                                    # Validate curve
+                                    is_valid, error_msg = curve.validate()
+                                    if is_valid:
+                                        # Densify curve
+                                        num_points = getattr(self.table, 'curve_densification_points', 15)
+                                        densified_points = curve.densify(num_points)
+                                        # Add densified points to coords
+                                        coords.extend(densified_points)
+                                    else:
+                                        logger.warning(f"Curva en fila {r} inválida: {error_msg}")
+                                        # Add just the start point
+                                        coords.append(start_point_utm)
+                            else:
+                                # Curve without complete parameters, add as regular point
+                                coords.append(start_point_utm)
+                    except Exception as e:
+                        logger.warning(f"Error processing curve at row {r}: {e}")
+                        continue
+            else:
+                # Regular point processing
+                xi = self.table.item(r, 1)
+                yi = self.table.item(r, 2)
+                if xi and yi and xi.text().strip() and yi.text().strip():
+                    try:
+                        x_str = xi.text().strip()
+                        y_str = yi.text().strip()
+                        
+                        # Convert coordinates to UTM based on current system
+                        if cs_text == "UTM":
+                            # Already in UTM
+                            x_val = float(x_str)
+                            y_val = float(y_str)
+                            coords.append((x_val, y_val))
+                            
+                        elif cs_text == "Geographic (Decimal Degrees)":
+                            # Convert DD to UTM
+                            lon = float(x_str)
+                            lat = float(y_str)
                             utm_epsg = get_utm_epsg(zone, hemisphere)
                             transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
                             x_utm, y_utm = transformer.transform(lon, lat)
                             coords.append((x_utm, y_utm))
-                        
-                    elif cs_text == "Web Mercator":
-                        # Convert Web Mercator to UTM
-                        x_mercator = float(x_str)
-                        y_mercator = float(y_str)
-                        # First to WGS84
-                        transformer_to_wgs84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
-                        lon, lat = transformer_to_wgs84.transform(x_mercator, y_mercator)
-                        # Then to UTM
-                        utm_epsg = get_utm_epsg(zone, hemisphere)
-                        transformer_to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
-                        x_utm, y_utm = transformer_to_utm.transform(lon, lat)
-                        coords.append((x_utm, y_utm))
-                        
-                except Exception as e:
-                    logger.warning(f"Error parsing coordinate at row {r}: {e}")
-                    continue
+                            
+                        elif cs_text == "Geographic (DMS)":
+                            # Parse DMS and convert to UTM
+                            is_valid_lon, lon = validate_dms_coordinate(x_str, is_longitude=True)
+                            is_valid_lat, lat = validate_dms_coordinate(y_str, is_longitude=False)
+                            if is_valid_lon and is_valid_lat:
+                                utm_epsg = get_utm_epsg(zone, hemisphere)
+                                transformer = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
+                                x_utm, y_utm = transformer.transform(lon, lat)
+                                coords.append((x_utm, y_utm))
+                            
+                        elif cs_text == "Web Mercator":
+                            # Convert Web Mercator to UTM
+                            x_mercator = float(x_str)
+                            y_mercator = float(y_str)
+                            # First to WGS84
+                            transformer_to_wgs84 = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+                            lon, lat = transformer_to_wgs84.transform(x_mercator, y_mercator)
+                            # Then to UTM
+                            utm_epsg = get_utm_epsg(zone, hemisphere)
+                            transformer_to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{utm_epsg}", always_xy=True)
+                            x_utm, y_utm = transformer_to_utm.transform(lon, lat)
+                            coords.append((x_utm, y_utm))
+                            
+                    except Exception as e:
+                        logger.warning(f"Error parsing coordinate at row {r}: {e}")
+                        continue
 
         mgr = CoordinateManager(
             hemisphere=hemisphere,

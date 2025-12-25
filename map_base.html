@@ -14,6 +14,27 @@
             font-family: Arial, sans-serif;
         }
 
+        /* Coordinate tooltip styling */
+        .coordinate-tooltip {
+            background: rgba(33, 33, 33, 0.9);
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: white;
+            font-size: 12px;
+            line-height: 1.4;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .coordinate-tooltip strong {
+            color: #64B5F6;
+            font-size: 13px;
+        }
+
+        .leaflet-tooltip-top.coordinate-tooltip:before {
+            border-top-color: rgba(33, 33, 33, 0.9);
+        }
+
         #loading {
             position: absolute;
             top: 50%;
@@ -161,9 +182,12 @@
         }).setView([0, 0], 2);
 
         // Load OpenStreetMap tiles over HTTPS
+        // maxNativeZoom: tiles are available up to zoom 19
+        // maxZoom: allow user to zoom in further (for 2m, 5m, 10m, 20m scales)
         var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             subdomains: ['a', 'b', 'c'],
-            maxZoom: 19,
+            maxZoom: 21,  // Allow zooming beyond native tiles for smaller scales (2m, 5m, 10m, 20m)
+            maxNativeZoom: 19,  // OSM native tiles only go to 19
             minZoom: 1,
             tileSize: 256,
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -219,17 +243,46 @@
         // Layer that will hold all features sent from Python
         var geoLayer = L.geoJSON(null, {
             style: function (feature) {
-                return {
-                    color: '#0000ff',
-                    weight: 2,
-                    opacity: 0.7,
-                    fillOpacity: 0.2
-                };
+                // Differentiate curves from regular geometry
+                var isCurve = feature.properties && feature.properties.is_curve;
+                var isShape = feature.properties && feature.properties.is_shape;
+
+                if (isCurve) {
+                    // Curved segments - orange, dashed line
+                    return {
+                        color: '#ff8c00',  // Orange for curves
+                        weight: 3,
+                        opacity: 0.9,
+                        dashArray: '8, 4',  // Dashed line
+                        fillOpacity: 0.1
+                    };
+                } else if (isShape) {
+                    // Regular polygon/polyline shapes
+                    return {
+                        color: '#0000ff',  // Blue
+                        weight: 2,
+                        opacity: 0.7,
+                        fillOpacity: 0.2
+                    };
+                } else {
+                    // Default style
+                    return {
+                        color: '#0000ff',
+                        weight: 2,
+                        opacity: 0.7,
+                        fillOpacity: 0.2
+                    };
+                }
             },
             pointToLayer: function (feature, latlng) {
+                // Get point ID for tooltip
+                var pointId = feature.properties.id || 'N/A';
+
                 // Use a marker for points to allow dragging
+                // Start with opacity 0 (hidden) - will be shown when edit mode is enabled
                 var marker = L.marker(latlng, {
                     draggable: isEditable, // Set initial state based on global flag
+                    opacity: isEditable ? 1 : 0,  // Start hidden unless edit mode is on
                     icon: L.divIcon({
                         className: 'custom-div-icon',
                         html: "<div style='background-color:#ff0000; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff;'></div>",
@@ -238,18 +291,49 @@
                     })
                 });
 
+                // Add tooltip with coordinates - shows on hover
+                var tooltipContent = '<strong>Punto ' + pointId + '</strong><br>' +
+                    'Lat: ' + latlng.lat.toFixed(6) + '<br>' +
+                    'Lng: ' + latlng.lng.toFixed(6);
+
+                marker.bindTooltip(tooltipContent, {
+                    permanent: false,
+                    direction: 'top',
+                    offset: [0, -8],
+                    className: 'coordinate-tooltip'
+                });
+
+                // Update tooltip when marker is dragged
+                marker.on('drag', function (e) {
+                    var pos = e.target.getLatLng();
+                    var newContent = '<strong>Punto ' + pointId + '</strong><br>' +
+                        'Lat: ' + pos.lat.toFixed(6) + '<br>' +
+                        'Lng: ' + pos.lng.toFixed(6);
+                    marker.setTooltipContent(newContent);
+                });
+
+                // ============ DEBUG MODE ============
+                var DEBUG_MODE = false;  // Set to false in production for better performance
+                function debugLog(msg) {
+                    if (DEBUG_MODE) {
+                        console.log('[DEBUG-DRAG] ' + msg);
+                    }
+                }
+                // =====================================
+
                 // Handle drag events
                 marker.on('dragstart', function (event) {
                     var marker = event.target;
                     var position = marker.getLatLng();
                     var id = feature.properties.id;
 
-                    // Notify Python that drag started
-                    if (window.pyBridge && window.pyBridge.onDragStart) {
-                        window.pyBridge.onDragStart(id, position.lat, position.lng);
-                    } else {
-                        console.log('GEOWIZARD:drag_start:' + id + ':' + position.lat + ':' + position.lng);
-                    }
+                    debugLog('=== DRAG START ===');
+                    debugLog('Feature ID: "' + id + '" (type: ' + typeof id + ')');
+                    debugLog('Position: lat=' + position.lat + ', lng=' + position.lng);
+
+                    // ALWAYS use console.log method - pyBridge Slot invocation is broken
+                    // Python's javaScriptConsoleMessage intercepts GEOWIZARD: commands
+                    console.log('GEOWIZARD:drag_start:' + id + ':' + position.lat + ':' + position.lng);
                 });
 
                 marker.on('drag', function (event) {
@@ -257,10 +341,16 @@
                     var position = marker.getLatLng();
                     var id = feature.properties.id;
 
-                    // Notify Python during drag for live table updates
-                    if (window.pyBridge && window.pyBridge.onDrag) {
-                        window.pyBridge.onDrag(id, position.lat, position.lng);
+                    // Only log every 10th drag event to avoid spam
+                    if (!window._dragCount) window._dragCount = 0;
+                    window._dragCount++;
+                    if (window._dragCount % 10 === 0) {
+                        debugLog('DRAG event #' + window._dragCount + ' - ID: "' + id + '" lat=' + position.lat.toFixed(6));
                     }
+
+                    // ALWAYS use console.log method - pyBridge Slot invocation is broken
+                    // Python's javaScriptConsoleMessage intercepts GEOWIZARD: commands
+                    console.log('GEOWIZARD:update_point_live:' + id + ':' + position.lat + ':' + position.lng);
 
                     // Update polygon/polyline vertices in real-time for visual feedback
                     updatePolygonVertices(id, position.lat, position.lng);
@@ -271,23 +361,30 @@
                     var position = marker.getLatLng();
                     var id = feature.properties.id;
 
-                    // Notify Python to update table and measurements
-                    if (window.pyBridge && window.pyBridge.onDragEnd) {
-                        window.pyBridge.onDragEnd(id, position.lat, position.lng);
-                    } else {
-                        console.log('GEOWIZARD:update_point_live:' + id + ':' + position.lat + ':' + position.lng);
-                        setTimeout(function () {
-                            console.log('GEOWIZARD:drag_end:' + id + ':' + position.lat + ':' + position.lng);
-                        }, 50);
-                    }
+                    debugLog('=== DRAG END ===');
+                    debugLog('Feature ID: "' + id + '" (type: ' + typeof id + ')');
+                    debugLog('Final Position: lat=' + position.lat + ', lng=' + position.lng);
+                    debugLog('Total drag events: ' + window._dragCount);
+                    window._dragCount = 0; // Reset counter
+
+                    // ALWAYS use console.log method - pyBridge Slot invocation is broken
+                    // First update the table, then signal drag end
+                    console.log('GEOWIZARD:update_point_live:' + id + ':' + position.lat + ':' + position.lng);
+                    setTimeout(function () {
+                        console.log('GEOWIZARD:drag_end:' + id + ':' + position.lat + ':' + position.lng);
+                    }, 50);
+                });
+
+                // Add click handler to select row in table (via console.log command)
+                marker.on('click', function (event) {
+                    var id = feature.properties.id;
+                    console.log('GEOWIZARD:select_point:' + id);
                 });
 
                 return marker;
             },
             onEachFeature: function (feature, layer) {
-                if (feature.properties && feature.properties.id) {
-                    layer.bindPopup('ID: ' + feature.properties.id);
-                }
+                // No popup - tooltip on hover is sufficient
             }
         }).addTo(map);
 
@@ -321,22 +418,8 @@
             });
         }
 
-        // Enable/Disable editing (called from Python)
-        window.setEditable = function (editable) {
-            isEditable = editable;
-            geoLayer.eachLayer(function (layer) {
-                if (layer instanceof L.Marker) {
-                    if (layer.dragging) {
-                        if (editable) {
-                            layer.dragging.enable();
-                        } else {
-                            layer.dragging.disable();
-                        }
-                    }
-                }
-            });
-            return true;
-        };
+
+        // NOTE: setEditable is defined later in the file with full functionality
 
         // Add a GeoJSON feature or feature collection to the map
         window.addFeature = function (geojsonData) {
@@ -429,13 +512,14 @@
             // Update global flag
             isEditable = enabled;
 
-            // Find all markers in the geoLayer and enable/disable dragging
+            // Find all markers in the geoLayer and enable/disable dragging + visibility
             geoLayer.eachLayer(function (layer) {
                 if (layer instanceof L.Marker) {
                     var markerId = layer.feature ? layer.feature.properties.id : 'unknown';
 
                     if (enabled) {
-                        // Enable dragging - need to set the draggable option
+                        // Show marker and enable dragging
+                        layer.setOpacity(1);  // Make marker visible
                         layer.options.draggable = true;
                         if (layer.dragging) {
                             layer.dragging.enable();
@@ -443,7 +527,8 @@
                         editableMarkers.push(layer);
                         console.log('Enabled dragging for marker:', markerId);
                     } else {
-                        // Disable dragging
+                        // Hide marker and disable dragging
+                        layer.setOpacity(0);  // Make marker invisible
                         layer.options.draggable = false;
                         if (layer.dragging) {
                             layer.dragging.disable();
@@ -458,6 +543,16 @@
             }
 
             console.log('Edit mode is now:', isEditable ? 'ENABLED' : 'DISABLED');
+        };
+
+        // Show/hide point markers (called when "Punto" checkbox is toggled)
+        window.setMarkersVisible = function (visible) {
+            console.log('setMarkersVisible called with:', visible);
+            geoLayer.eachLayer(function (layer) {
+                if (layer instanceof L.Marker) {
+                    layer.setOpacity(visible ? 1 : 0);
+                }
+            });
         };
 
         // Log that the map is ready

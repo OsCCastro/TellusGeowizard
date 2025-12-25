@@ -22,20 +22,20 @@ class GeometryBuilder:
             pts = feat["coords"]
             typ = feat["type"]
 
-            # cerrar anillo solo en Polygon
-            if typ == "Polygon":
+            # cerrar anillo solo en Polígono
+            if typ == "Polígono":
                 pts = pts + [pts[0]]
             path = QPainterPath(QPointF(*pts[0]))
             for x,y in pts[1:]:
                 path.lineTo(x,y)
 
             # definir estilo
-            if typ == "Point":
+            if typ == "Punto":
                 # en GUI dibujaremos un pequeño círculo, no via path
                 continue
-            elif typ == "LineString":
+            elif typ == "Polilínea":
                 pen = QPen(Qt.blue, 2)
-            else:  # Polygon
+            else:  # Polígono
                 pen = QPen(Qt.green, 1)
                 pen.setStyle(Qt.SolidLine)
 

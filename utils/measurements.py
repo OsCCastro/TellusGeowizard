@@ -1,6 +1,7 @@
 """
 Measurement utilities for calculating distances, areas, and perimeters.
 Supports both planar (UTM) and geodesic (geographic) calculations.
+Supports arc-aware calculations for curved segments.
 """
 
 from math import sqrt
@@ -8,6 +9,63 @@ from pyproj import Geod
 
 # Initialize WGS84 ellipsoid for geodesic calculations
 geod = Geod(ellps='WGS84')
+
+# Import curve support
+try:
+    from core.curve_geometry import CurveSegment
+    CURVE_SUPPORT = True
+except ImportError:
+    CURVE_SUPPORT = False
+
+
+def calculate_distance_with_curves(coords, curves=None):
+    """
+    Calculate distance for UTM coordinates, using arc length for curved segments.
+    
+    Args:
+        coords: List of (x, y) tuples in UTM meters
+        curves: List of CurveSegment objects or dicts with {start_index, curve_segment}
+        
+    Returns:
+        float: Total distance in meters (using arc length for curves)
+    """
+    if len(coords) < 2:
+        return 0.0
+    
+    if not curves or not CURVE_SUPPORT:
+        return calculate_distance_utm(coords)
+    
+    # Build a set of indices that are curve start points
+    curve_segments = {}
+    for curve_info in curves:
+        if isinstance(curve_info, dict):
+            idx = curve_info.get('start_index', -1)
+            segment = curve_info.get('curve_segment')
+            if segment:
+                curve_segments[idx] = segment
+        elif isinstance(curve_info, CurveSegment):
+            # If just a CurveSegment, we can't know which segment it replaces
+            pass
+    
+    total_distance = 0.0
+    for i in range(len(coords) - 1):
+        if i in curve_segments:
+            # Use arc length instead of chord
+            segment = curve_segments[i]
+            try:
+                total_distance += segment.calculate_arc_length()
+            except (ValueError, AttributeError):
+                # Fallback to chord if arc calculation fails
+                x1, y1 = coords[i]
+                x2, y2 = coords[i + 1]
+                total_distance += sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        else:
+            # Regular straight segment
+            x1, y1 = coords[i]
+            x2, y2 = coords[i + 1]
+            total_distance += sqrt((x2 - x1)**2 + (y2 - y1)**2)
+    
+    return total_distance
 
 
 def calculate_distance_utm(coords):

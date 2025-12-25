@@ -3,6 +3,13 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 from pyproj import Transformer
 
+# Import curve support for densification
+try:
+    from core.curve_geometry import CurveSegment
+    CURVE_SUPPORT = True
+except ImportError:
+    CURVE_SUPPORT = False
+
 class KMLExporter:
     @staticmethod
     def export(
@@ -10,12 +17,15 @@ class KMLExporter:
         filename: str,
         hemisphere: str,
         zone: str,
-        html_dict: dict[int, str] = None
+        html_dict: dict[int, str] = None,
+        curves: list[dict] = None
     ):
         """
         Exporta features a un archivo KML, inyectando en la descripción
         (CDATA) el HTML que se indique en html_dict[feat_id]. Si para un
         feat_id no hay entrada en html_dict, usa la descripción UTM por defecto.
+        
+        Si hay curvas asociadas, las densifica para mostrar arcos suaves.
 
         Args:
             features: Lista de features. Cada feature es un dict con {
@@ -30,6 +40,8 @@ class KMLExporter:
                        html_str es el bloque de HTML (tabla, párrafos, etc.)
                        que quieres insertar dentro de <description><![CDATA[…]]></description>
                        de ese feature. Si es None o no existe la clave, se usará la descripción UTM.
+            curves: (Opcional) Lista de diccionarios con información de curvas.
+                    Cada dict tiene { "start_index": int, "curve_segment": CurveSegment }.
 
         Raises:
             ValueError: Si features está vacío, si filename no acaba en ".kml",
@@ -45,6 +57,10 @@ class KMLExporter:
         # Inicializar html_dict si no se pasa
         if html_dict is None:
             html_dict = {}
+        
+        # Inicializar curves si no se pasa
+        if curves is None:
+            curves = []
 
         # Validar zona y hemisferio
         try:
@@ -55,6 +71,19 @@ class KMLExporter:
                 raise ValueError(f"Hemisferio '{hemisphere}' no reconocido. Debe ser 'Norte' o 'Sur'.")
         except ValueError as e:
             raise ValueError(f"Error en parámetros de zona/hemisferio: {e}")
+
+        # Helper function to densify coordinates with curves
+        def densify_coords_with_curves(coords, feat_curves):
+            """
+            Expand coordinates by densifying any curved segments.
+            feat_curves is a list of {start_point_id, curve_segment} for this feature.
+            """
+            if not CURVE_SUPPORT or not feat_curves:
+                return coords
+            
+            # For now, return original coords if no curve densification needed
+            # TODO: Implement full curve densification based on start_point_id matching
+            return coords
 
         try:
             # 1) Definir transformación UTM -> WGS84

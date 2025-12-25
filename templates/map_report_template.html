@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporte de Mapa - GeoWizard</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            font-size: 10pt;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .page {
+            width: 297mm;
+            min-height: 210mm;
+            background: white;
+            margin: 10mm auto;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+            display: grid;
+            grid-template-columns: 1fr 200px;
+            grid-template-rows: 1fr auto;
+            overflow: hidden;
+        }
+
+        /* ═══════════════════════════════════════════════════════ */
+        /* MAIN MAP AREA */
+        /* ═══════════════════════════════════════════════════════ */
+        .map-container {
+            position: relative;
+            background: #1a1a2e;
+            border: 2px solid #333;
+            min-height: 140mm;
+        }
+
+        .map-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .map-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
+            color: #dfe6e9;
+            font-size: 14pt;
+        }
+
+        /* Coordinate grid labels */
+        .coord-label {
+            position: absolute;
+            font-size: 7pt;
+            color: #333;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 1px 3px;
+        }
+
+        .coord-label.top {
+            top: 2px;
+        }
+
+        .coord-label.bottom {
+            bottom: 2px;
+        }
+
+        .coord-label.left {
+            left: 2px;
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+        }
+
+        .coord-label.right {
+            right: 2px;
+            writing-mode: vertical-rl;
+        }
+
+        /* Scale bar */
+        .scale-bar {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .scale-bar-graphic {
+            display: flex;
+            height: 8px;
+            border: 1px solid #333;
+        }
+
+        .scale-bar-graphic .segment {
+            width: 20px;
+            height: 100%;
+        }
+
+        .scale-bar-graphic .segment:nth-child(odd) {
+            background: #333;
+        }
+
+        .scale-bar-graphic .segment:nth-child(even) {
+            background: white;
+        }
+
+        .scale-bar-labels {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            font-size: 7pt;
+            margin-top: 2px;
+        }
+
+        .scale-bar-unit {
+            font-size: 8pt;
+            font-weight: 500;
+            margin-top: 2px;
+        }
+
+        /* ═══════════════════════════════════════════════════════ */
+        /* RIGHT PANEL */
+        /* ═══════════════════════════════════════════════════════ */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            border-left: 2px solid #333;
+            background: #fafafa;
+        }
+
+        /* Compass Rose */
+        .compass-rose {
+            padding: 10px;
+            text-align: center;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .compass-rose svg {
+            width: 60px;
+            height: 60px;
+        }
+
+        /* Legend / Simbología */
+        .legend {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .legend h3 {
+            font-size: 11pt;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 5px;
+            font-size: 9pt;
+        }
+
+        .legend-symbol {
+            width: 20px;
+            height: 15px;
+            flex-shrink: 0;
+        }
+
+        .legend-symbol.polygon {
+            background: rgba(0, 120, 215, 0.3);
+            border: 2px solid #0078d7;
+            background-image: repeating-linear-gradient(45deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 120, 215, 0.5) 2px,
+                    rgba(0, 120, 215, 0.5) 4px);
+        }
+
+        .legend-symbol.vertex {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid #333;
+        }
+
+        .legend-symbol.point {
+            width: 12px;
+            height: 12px;
+            background: #e74c3c;
+            border-radius: 50%;
+        }
+
+        /* Coordinate Table */
+        .coord-table-section {
+            padding: 10px;
+            flex-grow: 1;
+        }
+
+        .coord-table-section h3 {
+            font-size: 11pt;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .coord-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 8pt;
+        }
+
+        .coord-table th {
+            background: #e67e22;
+            color: white;
+            padding: 4px 6px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .coord-table td {
+            padding: 3px 6px;
+            border: 1px solid #ddd;
+            text-align: right;
+        }
+
+        .coord-table td:first-child {
+            text-align: center;
+            background: #f0f0f0;
+        }
+
+        .coord-table tr:nth-child(even) td {
+            background: #f9f9f9;
+        }
+
+        .coord-table tr:nth-child(even) td:first-child {
+            background: #e8e8e8;
+        }
+
+        /* Tellus Branding */
+        .branding-section {
+            padding: 15px 10px;
+            text-align: center;
+            border-top: 1px solid #ccc;
+            background: linear-gradient(to bottom, #f5f5f5, #ffffff);
+        }
+
+        .tellus-logo {
+            width: 80px;
+            height: auto;
+            margin-bottom: 8px;
+        }
+
+        .powered-by {
+            font-size: 8pt;
+            color: #666;
+            font-style: italic;
+        }
+
+        .powered-by strong {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        /* ═══════════════════════════════════════════════════════ */
+        /* BOTTOM METADATA BAR */
+        /* ═══════════════════════════════════════════════════════ */
+        .metadata-bar {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: 250px 1fr 180px 200px 150px;
+            border-top: 2px solid #333;
+            background: white;
+            font-size: 8pt;
+        }
+
+        .metadata-section {
+            padding: 8px;
+            border-right: 1px solid #333;
+        }
+
+        .metadata-section:last-child {
+            border-right: none;
+        }
+
+        /* References section */
+        .references {
+            font-size: 7pt;
+            color: #666;
+        }
+
+        .references h4 {
+            font-size: 8pt;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: #333;
+        }
+
+        /* Revision table */
+        .revision-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .revision-table th,
+        .revision-table td {
+            border: 1px solid #999;
+            padding: 2px 4px;
+            font-size: 7pt;
+        }
+
+        .revision-table th {
+            background: #e0e0e0;
+            font-weight: 500;
+        }
+
+        .field-row {
+            display: flex;
+            margin-bottom: 2px;
+        }
+
+        .field-label {
+            font-weight: 500;
+            min-width: 60px;
+        }
+
+        .field-value {
+            flex: 1;
+        }
+
+        /* Promovente section */
+        .promovente h4 {
+            font-size: 7pt;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .promovente .company-name {
+            font-size: 10pt;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 6px;
+        }
+
+        .promovente .responsible {
+            font-size: 7pt;
+            color: #666;
+        }
+
+        .promovente .responsible-name {
+            font-size: 9pt;
+            font-weight: 500;
+        }
+
+        /* Project section */
+        .project-section {
+            text-align: center;
+        }
+
+        .project-section h4 {
+            font-size: 8pt;
+            color: #666;
+            margin-bottom: 2px;
+        }
+
+        .project-section .project-title {
+            font-size: 9pt;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+
+        .project-section .project-code {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #c0392b;
+            margin-bottom: 2px;
+        }
+
+        .project-section .project-subtitle {
+            font-size: 8pt;
+            color: #666;
+        }
+
+        /* Location map thumbnail */
+        .location-map {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .location-map-img {
+            width: 100%;
+            height: 60px;
+            object-fit: cover;
+            border: 1px solid #333;
+        }
+
+        .location-map-placeholder {
+            width: 100%;
+            height: 60px;
+            background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+            border: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 8pt;
+        }
+
+        .location-map-label {
+            font-size: 7pt;
+            margin-top: 2px;
+            color: #666;
+        }
+
+        /* ═══════════════════════════════════════════════════════ */
+        /* PRINT STYLES */
+        /* ═══════════════════════════════════════════════════════ */
+        @media print {
+            body {
+                background: white;
+            }
+
+            .page {
+                margin: 0;
+                box-shadow: none;
+                width: 297mm;
+                height: 210mm;
+            }
+        }
+
+        /* ═══════════════════════════════════════════════════════ */
+        /* UTILITY CLASSES */
+        /* ═══════════════════════════════════════════════════════ */
+        .text-center {
+            text-align: center;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .font-bold {
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- MAIN MAP AREA -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="map-container">
+            <!-- Map image will be injected here -->
+            <div class="map-placeholder" id="mapPlaceholder">
+                [IMAGEN DEL MAPA]
+            </div>
+
+            <!-- Coordinate labels (will be populated dynamically) -->
+            <span class="coord-label top" style="left: 20%;">{{COORD_X1}}</span>
+            <span class="coord-label top" style="left: 40%;">{{COORD_X2}}</span>
+            <span class="coord-label top" style="left: 60%;">{{COORD_X3}}</span>
+            <span class="coord-label top" style="left: 80%;">{{COORD_X4}}</span>
+
+            <span class="coord-label left" style="top: 25%;">{{COORD_Y1}}</span>
+            <span class="coord-label left" style="top: 50%;">{{COORD_Y2}}</span>
+            <span class="coord-label left" style="top: 75%;">{{COORD_Y3}}</span>
+
+            <!-- Scale Bar -->
+            <div class="scale-bar">
+                <div class="scale-bar-graphic">
+                    <div class="segment"></div>
+                    <div class="segment"></div>
+                    <div class="segment"></div>
+                    <div class="segment"></div>
+                    <div class="segment"></div>
+                </div>
+                <div class="scale-bar-labels">
+                    <span>0</span>
+                    <span>12.5</span>
+                    <span>25</span>
+                    <span>50</span>
+                    <span>75</span>
+                    <span>100</span>
+                </div>
+                <div class="scale-bar-unit">Metros</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- RIGHT PANEL -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="right-panel">
+            <!-- Compass Rose -->
+            <div class="compass-rose">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Outer circle -->
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="#333" stroke-width="1" />
+                    <!-- Main N-S arrow -->
+                    <polygon points="50,5 55,45 50,40 45,45" fill="#c0392b" />
+                    <polygon points="50,95 55,55 50,60 45,55" fill="#333" />
+                    <!-- E-W points -->
+                    <polygon points="95,50 55,45 60,50 55,55" fill="#888" />
+                    <polygon points="5,50 45,45 40,50 45,55" fill="#888" />
+                    <!-- Direction labels -->
+                    <text x="50" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">N</text>
+                    <text x="50" y="92" text-anchor="middle" font-size="8" fill="#666">S</text>
+                    <text x="88" y="54" text-anchor="middle" font-size="8" fill="#666">E</text>
+                    <text x="12" y="54" text-anchor="middle" font-size="8" fill="#666">W</text>
+                </svg>
+            </div>
+
+            <!-- Legend / Simbología -->
+            <div class="legend">
+                <h3>Simbología</h3>
+                <div class="legend-item">
+                    <div class="legend-symbol polygon"></div>
+                    <span>Polígono de la Instalación</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-symbol vertex"></div>
+                    <span>Vértices del Predio</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-symbol point"></div>
+                    <span>Ubicación Puntual</span>
+                </div>
+            </div>
+
+            <!-- Coordinate Table -->
+            <div class="coord-table-section">
+                <h3>Cuadro de Coordenadas</h3>
+                <table class="coord-table">
+                    <thead id="coordTableHeader">
+                        <tr>
+                            <th>ID</th>
+                            <th id="coordColX">X</th>
+                            <th id="coordColY">Y</th>
+                        </tr>
+                    </thead>
+                    <tbody id="coordTableBody">
+                        <!-- Coordinates will be populated dynamically -->
+                        <tr>
+                            <td>1</td>
+                            <td>337712.9012</td>
+                            <td>2627765.6423</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td>337699.3712</td>
+                            <td>2627132.5734</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td>337633.3145</td>
+                            <td>2627145.1923</td>
+                        </tr>
+                        <tr>
+                            <td>4</td>
+                            <td>337734.8567</td>
+                            <td>2627285.0189</td>
+                        </tr>
+                        <tr>
+                            <td>5</td>
+                            <td>337715.1123</td>
+                            <td>2627268.7845</td>
+                        </tr>
+                        <tr>
+                            <td>6</td>
+                            <td>337856.0934</td>
+                            <td>2627223.0812</td>
+                        </tr>
+                        <tr>
+                            <td>7</td>
+                            <td>337960.3456</td>
+                            <td>2627206.5321</td>
+                        </tr>
+                        <tr>
+                            <td>8</td>
+                            <td>337764.2678</td>
+                            <td>2627160.9623</td>
+                        </tr>
+                        <tr>
+                            <td>9</td>
+                            <td>337737.5745</td>
+                            <td>2627188.5634</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tellus Branding -->
+            <div class="branding-section">
+                <img src="../icons/tellus_logo.png" alt="Tellus Consultoría" class="tellus-logo" id="tellusLogo">
+                <div class="powered-by">
+                    Powered by <strong>Tellus Consultoría</strong><br>
+                    GeoWizard V.1.0
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- BOTTOM METADATA BAR -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="metadata-bar">
+            <!-- References -->
+            <div class="metadata-section references">
+                <h4>Referencias</h4>
+                <p>Service Layer Credits: World Imagery, Earthstar Geographics, World Imagery, Microsoft</p>
+                <table class="revision-table" style="margin-top: 5px;">
+                    <tr>
+                        <th>Rev.</th>
+                        <th>Descripción</th>
+                        <th>Fecha</th>
+                    </tr>
+                    <tr>
+                        <td id="revNumber">00</td>
+                        <td id="revDescription">Creación del Plano</td>
+                        <td id="revDate">{{FECHA}}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Technical Details -->
+            <div class="metadata-section">
+                <div class="field-row">
+                    <span class="field-label">Fecha:</span>
+                    <span class="field-value" id="docDate">{{FECHA_LARGA}}</span>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Escala:</span>
+                    <span class="field-value" id="docScale">1:1,000</span>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Dibujante:</span>
+                    <span class="field-value" id="docDrawer">{{DIBUJANTE}}</span>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Revisó:</span>
+                    <span class="field-value" id="docReviewer"></span>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Aprobó:</span>
+                    <span class="field-value" id="docApprover"></span>
+                </div>
+            </div>
+
+            <!-- Promovente -->
+            <div class="metadata-section promovente">
+                <h4>Promovente</h4>
+                <div class="company-name" id="promoventeName">{{PROMOVENTE}}</div>
+                <div class="responsible">Responsable Técnico</div>
+                <div class="responsible-name" id="responsibleName">{{RESPONSABLE}}</div>
+            </div>
+
+            <!-- Project Info -->
+            <div class="metadata-section project-section">
+                <h4>PROYECTO</h4>
+                <div class="project-title" id="projectTitle">{{PROYECTO_TITULO}}</div>
+                <div class="project-code" id="projectCode">{{CODIGO}}</div>
+                <div class="project-subtitle" id="projectSubtitle">{{SUBTITULO}}</div>
+            </div>
+
+            <!-- Location Map -->
+            <div class="metadata-section location-map">
+                <div class="location-map-placeholder" id="locationMap">
+                    Mapa de Ubicación
+                </div>
+                <div class="location-map-label" id="locationLabel">{{EMPRESA}}</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Template data placeholder - will be replaced by Python
+        const templateData = {
+            // Project info
+            proyecto_titulo: "{{PROYECTO_TITULO}}",
+            codigo: "{{CODIGO}}",
+            subtitulo: "{{SUBTITULO}}",
+
+            // Promovente
+            promovente: "{{PROMOVENTE}}",
+            responsable: "{{RESPONSABLE}}",
+            empresa: "{{EMPRESA}}",
+
+            // Dates
+            fecha: "{{FECHA}}",
+            fecha_larga: "{{FECHA_LARGA}}",
+
+            // Technical
+            escala: "{{ESCALA}}",
+            dibujante: "{{DIBUJANTE}}",
+            reviso: "{{REVISO}}",
+            aprobo: "{{APROBO}}",
+
+            // Coordinates (array of {id, x, y})
+            coordenadas: [],
+
+            // Map image as base64 or URL
+            mapa_imagen: null,
+            mapa_ubicacion: null
+        };
+
+        // Function to populate template with data
+        function populateTemplate(data) {
+            // Update text fields - only if value exists
+            if (data.proyecto_titulo !== undefined) {
+                document.getElementById('projectTitle').textContent = data.proyecto_titulo || '';
+            }
+            if (data.codigo !== undefined) {
+                document.getElementById('projectCode').textContent = data.codigo || '';
+            }
+            if (data.subtitulo !== undefined) {
+                document.getElementById('projectSubtitle').textContent = data.subtitulo || '';
+            }
+            if (data.promovente !== undefined) {
+                document.getElementById('promoventeName').textContent = data.promovente || '';
+            }
+            if (data.responsable !== undefined) {
+                document.getElementById('responsibleName').textContent = data.responsable || '';
+            }
+            if (data.fecha !== undefined) {
+                document.getElementById('revDate').textContent = data.fecha || '';
+            }
+            if (data.fecha_larga !== undefined) {
+                document.getElementById('docDate').textContent = data.fecha_larga || '';
+            }
+            if (data.escala !== undefined) {
+                document.getElementById('docScale').textContent = data.escala || '1:1,000';
+            }
+            if (data.dibujante !== undefined) {
+                document.getElementById('docDrawer').textContent = data.dibujante || 'GeoWizard V.1.0';
+            }
+            if (data.reviso !== undefined) {
+                document.getElementById('docReviewer').textContent = data.reviso || '';
+            }
+            if (data.aprobo !== undefined) {
+                document.getElementById('docApprover').textContent = data.aprobo || '';
+            }
+            if (data.empresa !== undefined) {
+                document.getElementById('locationLabel').textContent = data.empresa || '';
+            }
+
+            // Update coordinate table headers based on coordinate system
+            if (data.coord_system !== undefined) {
+                const colX = document.getElementById('coordColX');
+                const colY = document.getElementById('coordColY');
+
+                if (data.coord_system === 'UTM') {
+                    colX.textContent = 'X (Este)';
+                    colY.textContent = 'Y (Norte)';
+                } else if (data.coord_system.includes('Geographic') || data.coord_system.includes('Decimal')) {
+                    colX.textContent = 'Longitud';
+                    colY.textContent = 'Latitud';
+                } else if (data.coord_system.includes('DMS')) {
+                    colX.textContent = 'Longitud';
+                    colY.textContent = 'Latitud';
+                } else if (data.coord_system.includes('Web Mercator')) {
+                    colX.textContent = 'X';
+                    colY.textContent = 'Y';
+                } else {
+                    colX.textContent = 'X';
+                    colY.textContent = 'Y';
+                }
+            }
+
+            // Populate coordinate table with 4 decimals
+            if (data.coordenadas && data.coordenadas.length > 0) {
+                const tbody = document.getElementById('coordTableBody');
+                tbody.innerHTML = '';
+                data.coordenadas.forEach(coord => {
+                    const row = document.createElement('tr');
+                    const xVal = parseFloat(coord.x);
+                    const yVal = parseFloat(coord.y);
+                    row.innerHTML = `
+                        <td>${coord.id}</td>
+                        <td>${isNaN(xVal) ? coord.x : xVal.toFixed(4)}</td>
+                        <td>${isNaN(yVal) ? coord.y : yVal.toFixed(4)}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            // Set map image
+            if (data.mapa_imagen) {
+                const placeholder = document.getElementById('mapPlaceholder');
+                placeholder.innerHTML = `<img src="${data.mapa_imagen}" class="map-image" alt="Mapa">`;
+            }
+
+            // Set location map
+            if (data.mapa_ubicacion) {
+                const locMap = document.getElementById('locationMap');
+                locMap.innerHTML = `<img src="${data.mapa_ubicacion}" class="location-map-img" alt="Ubicación">`;
+            }
+        }
+
+        // If data is injected, populate on load
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof injectedData !== 'undefined') {
+                populateTemplate(injectedData);
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -15,6 +15,7 @@ class CurveSegment:
     - Centro del arco circular
     - Delta (ángulo de deflexión)
     - Radio del arco
+    - Dirección (horario/antihorario)
     """
     
     def __init__(
@@ -23,7 +24,8 @@ class CurveSegment:
         end_point: Optional[Tuple[float, float]] = None,
         center: Tuple[float, float] = None,
         delta: str = None,
-        radius: float = None
+        radius: float = None,
+        clockwise: bool = True
     ):
         """
         Inicializa un segmento curvo.
@@ -34,6 +36,7 @@ class CurveSegment:
             center: (x, y) centro del círculo
             delta: Ángulo de deflexión (formato DMS "05°5'5.56\"" o decimal "5.085")
             radius: Radio del arco en metros
+            clockwise: True = curva a la derecha (horario), False = curva a la izquierda (antihorario)
         """
         self.start_point = start_point
         self.end_point = end_point
@@ -41,6 +44,7 @@ class CurveSegment:
         self._delta_str = delta
         self.delta_degrees = self._parse_delta(delta) if delta else None
         self.radius = radius
+        self.clockwise = clockwise
     
     @staticmethod
     def _parse_delta(delta_str: str) -> float:
@@ -99,6 +103,66 @@ class CurveSegment:
         # L = r * θ (θ en radianes)
         theta_rad = math.radians(self.delta_degrees)
         return self.radius * theta_rad
+    
+    def calculate_subtangent(self) -> float:
+        """
+        Calcula la subtangente (ST) de la curva.
+        
+        ST = R * tan(Δ/2)
+        
+        Returns:
+            Subtangente en metros
+        """
+        if not self.radius or not self.delta_degrees:
+            raise ValueError("Radio y delta son requeridos para calcular subtangente")
+        
+        half_delta_rad = math.radians(self.delta_degrees / 2)
+        return self.radius * math.tan(half_delta_rad)
+    
+    def calculate_tangent_external(self) -> float:
+        """
+        Calcula la tangente externa (E) de la curva.
+        
+        E = R * (1/cos(Δ/2) - 1) = R * (sec(Δ/2) - 1)
+        
+        Returns:
+            Tangente externa en metros
+        """
+        if not self.radius or not self.delta_degrees:
+            raise ValueError("Radio y delta son requeridos para calcular tangente externa")
+        
+        half_delta_rad = math.radians(self.delta_degrees / 2)
+        return self.radius * (1 / math.cos(half_delta_rad) - 1)
+    
+    def calculate_chord_length(self) -> float:
+        """
+        Calcula la cuerda larga (C) de la curva.
+        
+        C = 2 * R * sin(Δ/2)
+        
+        Returns:
+            Longitud de la cuerda en metros
+        """
+        if not self.radius or not self.delta_degrees:
+            raise ValueError("Radio y delta son requeridos para calcular cuerda")
+        
+        half_delta_rad = math.radians(self.delta_degrees / 2)
+        return 2 * self.radius * math.sin(half_delta_rad)
+    
+    def calculate_middle_ordinate(self) -> float:
+        """
+        Calcula la ordenada media (M) de la curva.
+        
+        M = R * (1 - cos(Δ/2))
+        
+        Returns:
+            Ordenada media en metros
+        """
+        if not self.radius or not self.delta_degrees:
+            raise ValueError("Radio y delta son requeridos para calcular ordenada media")
+        
+        half_delta_rad = math.radians(self.delta_degrees / 2)
+        return self.radius * (1 - math.cos(half_delta_rad))
     
     def densify(self, num_points: int = 15) -> List[Tuple[float, float]]:
         """
@@ -201,7 +265,8 @@ class CurveSegment:
             "center": self.center,
             "delta": self._delta_str,
             "delta_degrees": self.delta_degrees,
-            "radius": self.radius
+            "radius": self.radius,
+            "clockwise": self.clockwise
         }
     
     @classmethod
@@ -212,5 +277,6 @@ class CurveSegment:
             end_point=tuple(data["end_point"]) if data.get("end_point") else None,
             center=tuple(data["center"]),
             delta=data["delta"],
-            radius=data["radius"]
+            radius=data["radius"],
+            clockwise=data.get("clockwise", True)  # Default True for backwards compatibility
         )

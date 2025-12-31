@@ -67,7 +67,8 @@ from utils.coordinate_systems import (
     format_dms,
     parse_dms,
     validate_dms_coordinate,
-    get_utm_epsg
+    get_utm_epsg,
+    detect_utm_from_coords,  # NEW: Auto-detect UTM zone and hemisphere
 )
 
 # Import error handling
@@ -89,6 +90,7 @@ from ui.html_preview_dialog import HTMLPreviewDialog
 from ui.custom_message_box import CustomMessageBox
 from ui.custom_titlebar import CustomTitleBar
 from ui.warning_panel import WarningPanel, get_error_solution, KNOWN_ERRORS
+from ui.table_manager import TableManager  # Refactored table operations
 
 # Initialize logger for this module
 logger = get_logger(__name__)
@@ -707,6 +709,14 @@ class MainWindow(QMainWindow):
         # Connect to zone/hemisphere change handler
         self.cb_zona.currentIndexChanged.connect(self._on_zone_hemisphere_changed)
         self.hz_layout.addWidget(self.cb_zona)
+        
+        # NEW: Auto-detect UTM button
+        self.btn_auto_utm = QPushButton("🎯 Auto")
+        self.btn_auto_utm.setToolTip("Auto-detectar zona UTM y hemisferio desde las coordenadas")
+        self.btn_auto_utm.setFixedWidth(60)
+        self.btn_auto_utm.clicked.connect(self._on_auto_detect_utm)
+        self.hz_layout.addWidget(self.btn_auto_utm)
+        
         control.addLayout(self.hz_layout)
 
         # Tabla de coordenadas
@@ -738,6 +748,10 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_table_menu)
         control.addWidget(self.table)
+        
+        # Initialize TableManager for delegating table operations
+        self.table_manager = TableManager(self.table, self)
+        self.table_manager.tableModified.connect(self._on_table_modified)
         
         # NEW: Measurement Panel (Sidebar - Unit Selector only)
         measurements_group = QLabel("📏 Configuración Mediciones")
@@ -878,6 +892,17 @@ class MainWindow(QMainWindow):
                 csv_action.setToolTip("Exportar tabla a CSV")
                 csv_action.triggered.connect(self._export_csv)
                 tb.addAction(csv_action)
+                
+                # NEW: Batch export button
+                batch_action = QAction(
+                    self._icono("folder-download-fill.svg"),
+                    "Exportar Lotes",
+                    self
+                )
+                batch_action.svg_filename = "folder-download-fill.svg"
+                batch_action.setToolTip("Exportar a múltiples formatos (KML, SHP, CSV)")
+                batch_action.triggered.connect(self._on_batch_export)
+                tb.addAction(batch_action)
 
         tb.addSeparator()
 
@@ -1044,6 +1069,99 @@ class MainWindow(QMainWindow):
         except Exception as e:
             CustomMessageBox.critical(self, "Error al exportar CSV", f"No se pudo escribir el archivo:\n{e}")
 
+    def _on_batch_export(self):
+        """
+        Open batch export dialog and export to multiple formats.
+        """
+        from ui.batch_export_dialog import BatchExportDialog
+        from pathlib import Path
+        
+        # Build manager from table
+        try:
+            mgr = self._build_manager_from_table()
+            features = mgr.get_features()
+            if not features:
+                CustomMessageBox.warning(
+                    self,
+                    "Sin Datos",
+                    "No hay coordenadas para exportar. Añada datos a la tabla primero."
+                )
+                return
+        except Exception as e:
+            CustomMessageBox.warning(self, "Error", f"Error al preparar datos: {e}")
+            return
+        
+        # Open dialog
+        dialog = BatchExportDialog(self)
+        if dialog.exec() != dialog.Accepted:
+            return
+        
+        # Get parameters
+        formats, output_dir, basename = dialog.get_export_params()
+        if not formats or not output_dir:
+            return
+        
+        output_path = Path(output_dir)
+        results = []
+        errors = []
+        
+        # Export to each format
+        for fmt in formats:
+            try:
+                filepath = output_path / f"{basename}.{fmt}"
+                
+                if fmt == "kml":
+                    KMLExporter.export_to_file(str(filepath), mgr.get_features())
+                    results.append(f"✅ KML: {filepath.name}")
+                    
+                elif fmt == "kmz":
+                    KMZExporter.export_to_file(str(filepath), mgr.get_features())
+                    results.append(f"✅ KMZ: {filepath.name}")
+                    
+                elif fmt == "shp":
+                    ShapefileExporter.export_to_file(str(filepath), mgr.get_features())
+                    results.append(f"✅ SHP: {filepath.name}")
+                    
+                elif fmt == "csv":
+                    # Simple CSV export
+                    csv_path = output_path / f"{basename}.csv"
+                    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(["ID", "X", "Y"])
+                        for r in range(self.table.rowCount()):
+                            id_item = self.table.item(r, 0)
+                            x_item = self.table.item(r, 1)
+                            y_item = self.table.item(r, 2)
+                            if id_item and id_item.text().strip():
+                                writer.writerow([
+                                    id_item.text() if id_item else "",
+                                    x_item.text() if x_item else "",
+                                    y_item.text() if y_item else ""
+                                ])
+                    results.append(f"✅ CSV: {csv_path.name}")
+                    
+                elif fmt == "gwz":
+                    gwz_path = output_path / f"{basename}.gwz"
+                    GWZExporter.export_to_file(str(gwz_path), mgr.get_features())
+                    results.append(f"✅ GWZ: {gwz_path.name}")
+                    
+            except Exception as e:
+                errors.append(f"❌ {fmt.upper()}: {str(e)}")
+                logger.error(f"Batch export error for {fmt}: {e}")
+        
+        # Show results
+        message = f"Exportación completada a: {output_dir}\n\n"
+        if results:
+            message += "Archivos creados:\n" + "\n".join(results)
+        if errors:
+            message += "\n\nErrores:\n" + "\n".join(errors)
+        
+        if errors:
+            CustomMessageBox.warning(self, "Exportación Parcial", message)
+        else:
+            CustomMessageBox.information(self, "Exportación Exitosa", message)
+        
+        logger.info(f"Batch export to {output_dir}: {len(results)} success, {len(errors)} errors")
 
     def _toggle_modo(self, activado):
         self._modo_oscuro = activado
@@ -1182,6 +1300,16 @@ class MainWindow(QMainWindow):
         for action in self.findChildren(QAction):
             if hasattr(action, 'svg_filename'):
                 action.setIcon(self._icono(action.svg_filename))
+    
+    def _on_table_modified(self):
+        """Handle tableModified signal from TableManager."""
+        if self._edit_mode:
+            return
+        try:
+            mgr = self._build_manager_from_table()
+            self._redraw_scene(mgr)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error rebuilding geometry after table modification: {e}")
 
     def _on_cell_changed(self, item):
         r, c = item.row(), item.column()
@@ -1251,108 +1379,29 @@ class MainWindow(QMainWindow):
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _copy_selection(self):
-        ranges = self.table.selectedRanges()
-        if not ranges:
-            return
-        text = ""
-        for r in ranges:
-            for row in range(r.topRow(), r.bottomRow()+1):
-                parts = []
-                for col in range(r.leftColumn(), r.rightColumn()+1):
-                    itm = self.table.item(row,col)
-                    parts.append(itm.text() if itm else "")
-                text += "\t".join(parts) + "\n"
-        QApplication.clipboard().setText(text)
+        """Copy selection to clipboard - delegates to TableManager."""
+        self.table_manager.copy_selection()
 
     def _convert_to_curve(self, row):
-        """Convierte una fila a tipo curva."""
-        if row >= 0 and hasattr(self.table, 'mark_as_curve'):
-            self.table.mark_as_curve(row)
-            # Refresh preview após conversión
-            try:
-                mgr = self._build_manager_from_table()
-                self._redraw_scene(mgr)
-            except (ValueError, TypeError) as e:
-                print(f"Error al construir features para preview: {e}")
+        """Convert a row to curve type - delegates to TableManager."""
+        self.table_manager.convert_to_curve(row)
     
     def _convert_to_point(self, row):
-        """Convierte una fila a tipo punto."""
-        if row >= 0 and hasattr(self.table, 'convert_to_point'):
-            self.table.convert_to_point(row)
-            # Refresh preview after conversion
-            try:
-                mgr = self._build_manager_from_table()
-                self._redraw_scene(mgr)
-            except (ValueError, TypeError) as e:
-                print(f"Error al construir features para preview: {e}")
+        """Convert a row to point type - delegates to TableManager."""
+        self.table_manager.convert_to_point(row)
 
     def _add_row(self):
-        r = self.table.rowCount()
-        self.table.insertRow(r)
-        id_it = QTableWidgetItem(str(r + 1))
-        id_it.setFlags(Qt.ItemIsEnabled)
-        self.table.setItem(r, 0, id_it)
-        self.table.setCurrentCell(r, 1)
-        item = QTableWidgetItem("")
-        self.table.setItem(r, 1, item)
-        self.table.editItem(item)
+        """Add a new row - delegates to TableManager."""
+        self.table_manager.add_row()
 
     def _delete_row(self):
-        r = self.table.currentRow()
-        if r >= 0:
-            self.table.removeRow(r)
-        try:
-            mgr = self._build_manager_from_table()
-            self._redraw_scene(mgr)
-        except (ValueError, TypeError) as e:
-            print(f"Error al construir features para preview tras eliminar fila: {e}")
+        """Delete current row - delegates to TableManager."""
+        self.table_manager.delete_current_row()
 
 
     def _paste_to_table(self):
-        lines = QApplication.clipboard().text().splitlines()
-        r = self.table.currentRow()
-        if r < 0:
-            r = 0
-            if self.table.item(r,0) and not (self.table.item(r,0).flags() & Qt.ItemIsEditable):
-                pass
-
-        for ln_idx, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-
-            current_id_item = self.table.item(r, 0)
-            is_id_cell_uneditable = current_id_item and not (current_id_item.flags() & Qt.ItemIsEditable)
-
-            if r >= self.table.rowCount():
-                self.table.insertRow(r)
-                id_it = QTableWidgetItem(str(r+1))
-                id_it.setFlags(Qt.ItemIsEnabled)
-                self.table.setItem(r,0,id_it)
-            elif is_id_cell_uneditable and (self.table.item(r,1) and self.table.item(r,1).text() or \
-                                          self.table.item(r,2) and self.table.item(r,2).text()):
-                pass
-
-            pts = [p.strip() for p in ln.split(",")]
-            if len(pts) < 2:
-                pts = [p.strip() for p in ln.split("\t")]
-
-            if len(pts) >= 2:
-                try:
-                    float(pts[0].replace(',','.'))
-                    float(pts[1].replace(',','.'))
-                except ValueError:
-                    CustomMessageBox.warning(self, "Error de Pegado", f"Línea '{ln}' no contiene coordenadas X,Y numéricas válidas.")
-                    continue
-
-                self.table.setItem(r,1, QTableWidgetItem(pts[0].replace(',','.')))
-                self.table.setItem(r,2, QTableWidgetItem(pts[1].replace(',','.')))
-                r += 1
-
-        try:
-            mgr = self._build_manager_from_table()
-            self._redraw_scene(mgr)
-        except (ValueError, TypeError) as e:
-             print(f"Error al construir features para preview tras pegar: {e}")
+        """Paste from clipboard - delegates to TableManager."""
+        self.table_manager.paste_from_clipboard()
 
     def _toggle_mapbase(self, checked):
         """Toggle basemap tiles visibility via JS, keeping the web view active."""
@@ -1373,6 +1422,91 @@ class MainWindow(QMainWindow):
         else:
             self.stack.setCurrentWidget(self.canvas)
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HELPER FUNCTIONS FOR _build_manager_from_table
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def _parse_coord_to_utm(self, x_str: str, y_str: str, cs_text: str,
+                            transformer_wgs84_to_utm, transformer_mercator_to_wgs84) -> tuple:
+        """
+        Parse coordinate strings and convert to UTM.
+        
+        Args:
+            x_str: X or longitude string
+            y_str: Y or latitude string  
+            cs_text: Current coordinate system name
+            transformer_wgs84_to_utm: Cached transformer WGS84 -> UTM
+            transformer_mercator_to_wgs84: Cached transformer Web Mercator -> WGS84
+            
+        Returns:
+            Tuple (x_utm, y_utm) or None if parsing fails
+        """
+        try:
+            if cs_text == "UTM":
+                return (float(x_str), float(y_str))
+                
+            elif cs_text == "Geographic (Decimal Degrees)":
+                lon, lat = float(x_str), float(y_str)
+                return transformer_wgs84_to_utm.transform(lon, lat)
+                
+            elif cs_text == "Geographic (DMS)":
+                is_valid_lon, lon = validate_dms_coordinate(x_str, is_longitude=True)
+                is_valid_lat, lat = validate_dms_coordinate(y_str, is_longitude=False)
+                if is_valid_lon and is_valid_lat:
+                    return transformer_wgs84_to_utm.transform(lon, lat)
+                return None
+                
+            elif cs_text == "Web Mercator":
+                x_m, y_m = float(x_str), float(y_str)
+                lon, lat = transformer_mercator_to_wgs84.transform(x_m, y_m)
+                return transformer_wgs84_to_utm.transform(lon, lat)
+                
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Coordinate parse error: {e}")
+        return None
+
+    def _add_geometry_features(self, mgr: CoordinateManager, coords: list) -> None:
+        """
+        Add geometry features to CoordinateManager based on checkbox states.
+        
+        Args:
+            mgr: CoordinateManager to add features to
+            coords: List of (x, y) UTM coordinates
+        """
+        if not coords:
+            return
+            
+        nid = 1
+        
+        # Add points if checkbox is checked
+        if self.chk_punto.isChecked():
+            for x, y in coords:
+                try:
+                    mgr.add_feature(nid, GeometryType.PUNTO, [(x, y)])
+                    nid += 1
+                except Exception as e:
+                    logger.error(f"Error creating point {nid}: {e}")
+        
+        # Add polyline if checkbox is checked
+        if self.chk_polilinea.isChecked():
+            if len(coords) >= 2:
+                try:
+                    mgr.add_feature(nid, GeometryType.POLILINEA, coords)
+                    nid += 1
+                except Exception as e:
+                    logger.error(f"Error creating polyline {nid}: {e}")
+            elif self.chk_polilinea.isEnabled():
+                logger.warning("Insufficient coordinates for polyline (need >= 2)")
+        
+        # Add polygon if checkbox is checked
+        if self.chk_poligono.isChecked():
+            if len(coords) >= 3:
+                try:
+                    mgr.add_feature(nid, GeometryType.POLIGONO, coords)
+                except Exception as e:
+                    logger.error(f"Error creating polygon {nid}: {e}")
+            elif self.chk_poligono.isEnabled():
+                logger.warning("Insufficient coordinates for polygon (need >= 3)")
 
     def _build_manager_from_table(self):
         """
@@ -2140,6 +2274,33 @@ class MainWindow(QMainWindow):
                 "perimetro_m": getattr(self, '_last_perimeter', 0),
                 "distancia_m": getattr(self, '_last_distance', 0)
             }
+            
+            # Collect selected geometry IDs from table
+            selected_geometries = []
+            selection_model = self.table.selectionModel()
+            for row in range(self.table.rowCount()):
+                id_item = self.table.item(row, 0)
+                if id_item and id_item.isSelected():
+                    id_text = id_item.text().strip()
+                    if id_text:
+                        selected_geometries.append(id_text)
+            
+            # Capture map preview as base64 (from canvas)
+            map_preview_base64 = None
+            try:
+                from PySide6.QtCore import QBuffer, QIODevice
+                from PySide6.QtGui import QPixmap
+                import base64
+                
+                # Render canvas to pixmap
+                pixmap = self.canvas.grab()
+                buffer = QBuffer()
+                buffer.open(QIODevice.WriteOnly)
+                pixmap.save(buffer, "PNG")
+                map_preview_base64 = base64.b64encode(buffer.data().data()).decode('utf-8')
+            except Exception as e:
+                logger.warning(f"Could not capture map preview: {e}")
+            
             GWZExporter.export(
                 table=self.table,
                 filename=full_path_filename,
@@ -2147,7 +2308,9 @@ class MainWindow(QMainWindow):
                 hemisphere=hemisphere,
                 coord_system=self.cb_coord_system.currentText(),
                 measurements=measurements,
-                project_data=project_data  # Pass wizard project data
+                project_data=project_data,
+                selected_geometries=selected_geometries,
+                map_preview_base64=map_preview_base64
             )
             export_successful = True
             
@@ -2229,6 +2392,84 @@ class MainWindow(QMainWindow):
         settings.setValue("last_hemisphere", self.cb_hemisferio.currentText())
         
         settings.endGroup()
+
+    def _on_auto_detect_utm(self):
+        """
+        Auto-detect UTM zone and hemisphere from the first coordinate in the table.
+        Works when coordinates are in Geographic (DD or DMS) or Web Mercator format.
+        """
+        cs_text = self.cb_coord_system.currentText()
+        
+        # Find first valid coordinate
+        lon, lat = None, None
+        for r in range(self.table.rowCount()):
+            x_item = self.table.item(r, 1)
+            y_item = self.table.item(r, 2)
+            if not x_item or not y_item:
+                continue
+            x_str = x_item.text().strip()
+            y_str = y_item.text().strip()
+            if not x_str or not y_str:
+                continue
+            
+            try:
+                if cs_text == "UTM":
+                    # Already in UTM - use current zone to reverse-calculate
+                    # Can't auto-detect from UTM without knowing zone
+                    CustomMessageBox.information(
+                        self,
+                        "Auto-Detectar UTM",
+                        "Para auto-detectar la zona UTM, primero cambie a coordenadas geográficas "
+                        "(Decimal Degrees o DMS) o importe datos con coordenadas geográficas."
+                    )
+                    return
+                    
+                elif cs_text == "Geographic (Decimal Degrees)":
+                    lon, lat = float(x_str), float(y_str)
+                    
+                elif cs_text == "Geographic (DMS)":
+                    is_valid_lon, lon = validate_dms_coordinate(x_str, is_longitude=True)
+                    is_valid_lat, lat = validate_dms_coordinate(y_str, is_longitude=False)
+                    if not (is_valid_lon and is_valid_lat):
+                        continue
+                        
+                elif cs_text == "Web Mercator":
+                    x_m, y_m = float(x_str), float(y_str)
+                    t = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+                    lon, lat = t.transform(x_m, y_m)
+                
+                if lon is not None and lat is not None:
+                    break
+                    
+            except (ValueError, TypeError):
+                continue
+        
+        if lon is None or lat is None:
+            CustomMessageBox.warning(
+                self,
+                "Auto-Detectar UTM",
+                "No se encontraron coordenadas válidas en la tabla para detectar la zona UTM."
+            )
+            return
+        
+        # Detect zone and hemisphere
+        zone, hemisphere = detect_utm_from_coords(lon, lat)
+        
+        # Update UI
+        self.cb_zona.setCurrentText(str(zone))
+        self.cb_hemisferio.setCurrentText(hemisphere)
+        
+        # Show confirmation
+        CustomMessageBox.information(
+            self,
+            "Auto-Detectar UTM",
+            f"Detectado automáticamente:\n\n"
+            f"• Zona UTM: {zone}\n"
+            f"• Hemisferio: {hemisphere}\n\n"
+            f"Basado en coordenadas: ({lon:.4f}, {lat:.4f})"
+        )
+        
+        logger.info(f"Auto-detected UTM zone {zone} {hemisphere} from ({lon:.4f}, {lat:.4f})")
 
     def _on_coord_system_changed(self):
         """
@@ -2513,6 +2754,15 @@ class MainWindow(QMainWindow):
         mgr = self._build_manager_from_table()
         self._update_web_features(mgr)
         self._update_measurements_display()
+        
+        # Restore saved geometry selections
+        selected_geometries = result.get('selected_geometries', [])
+        if selected_geometries:
+            self.table.clearSelection()
+            for row in range(self.table.rowCount()):
+                id_item = self.table.item(row, 0)
+                if id_item and id_item.text().strip() in selected_geometries:
+                    self.table.selectRow(row)
         
         self.warning_panel.add_success("OPEN", f"Proyecto abierto: {os.path.basename(path)}")
 

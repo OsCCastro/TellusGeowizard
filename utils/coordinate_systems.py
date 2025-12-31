@@ -264,3 +264,68 @@ def get_coordinate_system_info(cs_type: CoordinateSystemType) -> CoordinateSyste
         CoordinateSystem object
     """
     return COORDINATE_SYSTEMS[cs_type]
+
+
+def detect_utm_zone(longitude: float) -> int:
+    """
+    Detect UTM zone from longitude.
+    
+    The UTM system divides the Earth into 60 zones, each 6° wide.
+    Zone 1 covers 180°W to 174°W, Zone 31 covers 0° to 6°E, etc.
+    
+    Args:
+        longitude: Longitude in decimal degrees (-180 to 180)
+    
+    Returns:
+        UTM zone number (1-60)
+        
+    Examples:
+        >>> detect_utm_zone(-99.0)  # Mexico City
+        14
+        >>> detect_utm_zone(-3.7)   # Madrid
+        30
+    """
+    # Normalize longitude to -180 to 180
+    while longitude > 180:
+        longitude -= 360
+    while longitude < -180:
+        longitude += 360
+    
+    # Calculate zone
+    zone = int((longitude + 180) / 6) + 1
+    
+    # Clamp to valid range
+    return max(1, min(60, zone))
+
+
+def detect_hemisphere(latitude: float) -> str:
+    """
+    Detect hemisphere from latitude.
+    
+    Args:
+        latitude: Latitude in decimal degrees (-90 to 90)
+    
+    Returns:
+        "Norte" if latitude >= 0, "Sur" otherwise
+    """
+    return "Norte" if latitude >= 0 else "Sur"
+
+
+def detect_utm_from_coords(longitude: float, latitude: float) -> tuple:
+    """
+    Detect both UTM zone and hemisphere from geographic coordinates.
+    
+    Args:
+        longitude: Longitude in decimal degrees
+        latitude: Latitude in decimal degrees
+    
+    Returns:
+        Tuple of (zone: int, hemisphere: str)
+        
+    Example:
+        >>> detect_utm_from_coords(-99.1332, 19.4326)  # CDMX
+        (14, 'Norte')
+    """
+    zone = detect_utm_zone(longitude)
+    hemisphere = detect_hemisphere(latitude)
+    return zone, hemisphere

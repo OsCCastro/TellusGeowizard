@@ -180,5 +180,7 @@ class GWZImporter:
             "zone": metadata.get("zona_utm", 14),
             "hemisphere": metadata.get("hemisferio", "Norte"),
             "coord_system": metadata.get("sistema_predeterminado", "UTM"),
-            "measurements": gwz_data.get("mediciones", {})
+            "measurements": gwz_data.get("mediciones", {}),
+            "selected_geometries": gwz_data.get("selected_geometries", []),
+            "map_preview": gwz_data.get("map_preview", None)
         }

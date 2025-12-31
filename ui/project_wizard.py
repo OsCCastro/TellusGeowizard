@@ -10,14 +10,14 @@ import os
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSettings, Signal, QUrl
+from PySide6.QtCore import Qt, QSettings, Signal, QUrl, QSize
 from PySide6.QtGui import QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QWidget, QPushButton, QLabel, QLineEdit, QComboBox,
     QSpinBox, QDateEdit, QCheckBox, QFrame, QFileDialog,
     QListWidget, QListWidgetItem, QGroupBox, QFormLayout,
-    QSplitter, QSizePolicy, QScrollArea
+    QSplitter, QSizePolicy, QScrollArea, QMenu
 )
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -25,6 +25,9 @@ from ui.custom_titlebar import CustomTitleBar
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Tellus brand color
+TELLUS_GREEN = "#00a78e"
 
 
 class ProjectWizard(QDialog):
@@ -111,8 +114,8 @@ class ProjectWizard(QDialog):
         left_layout = QVBoxLayout(left_panel)
         left_layout.setSpacing(15)
         
-        # Logo/Title
-        title_label = QLabel("🗺️ GeoWizard")
+        # Logo/Title (without emoji)
+        title_label = QLabel("GeoWizard")
         title_label.setFont(QFont("Segoe UI", 24, QFont.Bold))
         title_label.setStyleSheet("color: #2c3e50;")
         left_layout.addWidget(title_label)
@@ -136,9 +139,10 @@ class ProjectWizard(QDialog):
         
         # Open existing project
         self.btn_open = self._create_action_button(
-            "📂 Abrir Proyecto Existente (.gwz)",
+            "Abrir Proyecto Existente (.gwz)",
             "Cargar un proyecto GeoWizard guardado",
-            "#3498db"
+            "#3498db",
+            "icons/wizard_assistent/existing-doc.svg"
         )
         self.btn_open.clicked.connect(lambda: self._on_action_selected('open'))
         left_layout.addWidget(self.btn_open)
@@ -151,36 +155,40 @@ class ProjectWizard(QDialog):
         
         # New from KML
         self.btn_new_kml = self._create_action_button(
-            "📍 Nuevo desde KML/KMZ",
+            "Nuevo desde KML/KMZ",
             "Importar geometrías desde Google Earth",
-            "#27ae60"
+            TELLUS_GREEN,
+            "icons/wizard_assistent/kml-file-format-extension.svg"
         )
         self.btn_new_kml.clicked.connect(lambda: self._on_action_selected('new_kml'))
         left_layout.addWidget(self.btn_new_kml)
         
         # New from SHP
         self.btn_new_shp = self._create_action_button(
-            "🗺️ Nuevo desde Shapefile",
+            "Nuevo desde Shapefile",
             "Importar geometrías desde archivo SHP",
-            "#27ae60"
+            TELLUS_GREEN,
+            "icons/wizard_assistent/shape-file-format-extension.svg"
         )
         self.btn_new_shp.clicked.connect(lambda: self._on_action_selected('new_shp'))
         left_layout.addWidget(self.btn_new_shp)
         
         # New from CSV
         self.btn_new_csv = self._create_action_button(
-            "📊 Nuevo desde CSV",
+            "Nuevo desde CSV",
             "Importar coordenadas desde archivo CSV",
-            "#27ae60"
+            TELLUS_GREEN,
+            "icons/wizard_assistent/csv-file-format-extension.svg"
         )
         self.btn_new_csv.clicked.connect(lambda: self._on_action_selected('new_csv'))
         left_layout.addWidget(self.btn_new_csv)
         
         # New empty
         self.btn_new_empty = self._create_action_button(
-            "✨ Proyecto Vacío",
+            "Proyecto Vacío",
             "Comenzar desde cero sin importar datos",
-            "#9b59b6"
+            "#9b59b6",
+            "icons/wizard_assistent/new-doc.svg"
         )
         self.btn_new_empty.clicked.connect(lambda: self._on_action_selected('new_empty'))
         left_layout.addWidget(self.btn_new_empty)
@@ -203,51 +211,71 @@ class ProjectWizard(QDialog):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setSpacing(10)
         
-        recent_label = QLabel("📋 Archivos Recientes")
+        # Recent files header with icon
+        recent_header = QHBoxLayout()
+        recent_icon = QLabel()
+        recent_icon.setPixmap(QPixmap("icons/wizard_assistent/historical-sumary.svg").scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        recent_header.addWidget(recent_icon)
+        
+        recent_label = QLabel("Archivos Recientes")
         recent_label.setFont(QFont("Segoe UI", 11, QFont.Bold))
         recent_label.setStyleSheet("color: #34495e;")
-        right_layout.addWidget(recent_label)
+        recent_header.addWidget(recent_label)
+        recent_header.addStretch()
+        right_layout.addLayout(recent_header)
         
         self.recent_list = QListWidget()
-        self.recent_list.setStyleSheet("""
-            QListWidget {
+        self.recent_list.setStyleSheet(f"""
+            QListWidget {{
                 border: 1px solid #bdc3c7;
                 border-radius: 5px;
                 background-color: #fafafa;
-            }
-            QListWidget::item {
+                outline: none;
+            }}
+            QListWidget::item {{
                 padding: 10px;
                 border-bottom: 1px solid #ecf0f1;
-            }
-            QListWidget::item:hover {
-                background-color: #e8f4fc;
-            }
-            QListWidget::item:selected {
-                background-color: #3498db;
+                outline: none;
+            }}
+            QListWidget::item:hover {{
+                background-color: #e8f8f0;
+            }}
+            QListWidget::item:selected {{
+                background-color: {TELLUS_GREEN};
                 color: white;
-            }
+                border: none;
+                outline: none;
+            }}
+            QListWidget::item:focus {{
+                outline: none;
+                border: none;
+            }}
         """)
+        self.recent_list.setFocusPolicy(Qt.NoFocus)
         self.recent_list.itemDoubleClicked.connect(self._on_recent_double_clicked)
+        self.recent_list.itemSelectionChanged.connect(self._on_recent_selection_changed)
+        self.recent_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.recent_list.customContextMenuRequested.connect(self._show_recent_context_menu)
         right_layout.addWidget(self.recent_list)
         
-        # Open selected recent
+        # Open selected recent - Tellus green when enabled
         self.btn_open_recent = QPushButton("Abrir Seleccionado")
         self.btn_open_recent.setEnabled(False)
-        self.btn_open_recent.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
+        self.btn_open_recent.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {TELLUS_GREEN};
                 color: white;
                 border: none;
                 padding: 10px 20px;
                 border-radius: 5px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
+            }}
+            QPushButton:hover {{
+                background-color: #008f79;
+            }}
+            QPushButton:disabled {{
                 background-color: #bdc3c7;
-            }
+            }}
         """)
         self.btn_open_recent.clicked.connect(self._on_open_recent)
         right_layout.addWidget(self.btn_open_recent)
@@ -256,16 +284,24 @@ class ProjectWizard(QDialog):
         
         self.stack.addWidget(page)
     
-    def _create_action_button(self, text: str, tooltip: str, color: str) -> QPushButton:
-        """Create a styled action button."""
+    def _create_action_button(self, text: str, tooltip: str, color: str, icon_path: str = None) -> QPushButton:
+        """Create a styled action button with optional icon."""
         btn = QPushButton(text)
         btn.setToolTip(tooltip)
         btn.setFont(QFont("Segoe UI", 10))
         btn.setCursor(Qt.PointingHandCursor)
+        
+        # Add icon if provided
+        if icon_path:
+            icon = QIcon(icon_path)
+            btn.setIcon(icon)
+            btn.setIconSize(QSize(24, 24))
+        
         btn.setStyleSheet(f"""
             QPushButton {{
                 text-align: left;
                 padding: 12px 15px;
+                padding-left: {22 if icon_path else 15}px;
                 border: 2px solid {color};
                 border-radius: 8px;
                 background-color: white;
@@ -305,6 +341,7 @@ class ProjectWizard(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("background-color: transparent;")
         
         form_widget = QWidget()
@@ -319,7 +356,7 @@ class ProjectWizard(QDialog):
         project_form.setSpacing(10)
         
         self.txt_titulo = QLineEdit()
-        self.txt_titulo.setPlaceholderText("Ej: Análisis de Riesgo del Sector Hidrocarburos")
+        self.txt_titulo.setPlaceholderText("Ej: Estudio de Impacto Ambiental")
         self.txt_titulo.textChanged.connect(self._update_preview)
         self.txt_titulo.textChanged.connect(self._update_output_folder)
         project_form.addRow("Título del Proyecto:", self.txt_titulo)
@@ -351,11 +388,6 @@ class ProjectWizard(QDialog):
         self.txt_code_suffix.textChanged.connect(self._update_code_preview)
         code_layout.addWidget(self.txt_code_suffix)
         
-        code_layout.addWidget(QLabel("="))
-        
-        self.lbl_code_preview = QLabel("GWZ-01-UBI")
-        self.lbl_code_preview.setStyleSheet("font-weight: bold; color: #c0392b; font-size: 12pt;")
-        code_layout.addWidget(self.lbl_code_preview)
         code_layout.addStretch()
         
         project_form.addRow("Código del Plano:", code_layout)
@@ -375,12 +407,12 @@ class ProjectWizard(QDialog):
         client_form.setSpacing(10)
         
         self.txt_promovente = QLineEdit()
-        self.txt_promovente.setPlaceholderText("Ej: Servicios Rodríguez Eguía, S.A. de C.V.")
+        self.txt_promovente.setPlaceholderText("Ej: Empresa Constructora, S.A. de C.V.")
         self.txt_promovente.textChanged.connect(self._update_preview)
         client_form.addRow("Empresa/Promovente:", self.txt_promovente)
         
         self.txt_responsable = QLineEdit()
-        self.txt_responsable.setPlaceholderText("Ej: Oscar Omar Contreras Castro")
+        self.txt_responsable.setPlaceholderText("Ej: Ing. Juan Pérez García")
         self.txt_responsable.textChanged.connect(self._update_preview)
         client_form.addRow("Responsable Técnico:", self.txt_responsable)
         
@@ -690,6 +722,9 @@ class ProjectWizard(QDialog):
                 self._source_file = filename
                 self._load_existing_project(filename)
                 self.stack.setCurrentIndex(1)
+                # Delay preview update to let page load
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(500, self._update_preview)
                 
         elif action.startswith('new_'):
             # Open file dialog for specific format
@@ -730,6 +765,85 @@ class ProjectWizard(QDialog):
         items = self.recent_list.selectedItems()
         if items:
             self._on_recent_double_clicked(items[0])
+    
+    def _on_recent_selection_changed(self):
+        """Update text colors when selection changes for better contrast."""
+        for i in range(self.recent_list.count()):
+            item = self.recent_list.item(i)
+            widget = self.recent_list.itemWidget(item)
+            if widget:
+                is_selected = item.isSelected()
+                # Update all labels in the widget
+                for label in widget.findChildren(QLabel):
+                    if is_selected:
+                        label.setStyleSheet("color: white; font-size: 10pt;" if "<b>" in label.text() else "color: rgba(255,255,255,0.85); font-size: 8pt;")
+                    else:
+                        # Restore original colors
+                        if "<b>" in label.text():
+                            label.setStyleSheet("color: #2c3e50; font-size: 10pt;")
+                        elif "Creado:" in label.text():
+                            label.setStyleSheet("color: #95a5a6; font-size: 8pt;")
+                        else:
+                            label.setStyleSheet("color: #7f8c8d; font-size: 8pt;")
+    
+    def _show_recent_context_menu(self, pos):
+        """Show context menu for recent files."""
+        item = self.recent_list.itemAt(pos)
+        if not item:
+            return
+        
+        filepath = item.data(Qt.UserRole)
+        if not filepath:
+            return
+        
+        menu = QMenu(self)
+        
+        # Open file
+        open_action = menu.addAction("📂 Abrir Proyecto")
+        open_action.triggered.connect(lambda: self._on_recent_double_clicked(item))
+        
+        # Open containing folder
+        open_folder_action = menu.addAction("📁 Abrir Ruta")
+        open_folder_action.triggered.connect(lambda: self._open_recent_folder(filepath))
+        
+        menu.addSeparator()
+        
+        # Copy path
+        copy_action = menu.addAction("📋 Copiar Ruta")
+        copy_action.triggered.connect(lambda: self._copy_path_to_clipboard(filepath))
+        
+        menu.addSeparator()
+        
+        # Remove from recents
+        remove_action = menu.addAction("🗑️ Eliminar de Recientes")
+        remove_action.triggered.connect(lambda: self._remove_from_recents(filepath))
+        
+        menu.exec(self.recent_list.mapToGlobal(pos))
+    
+    def _open_recent_folder(self, filepath: str):
+        """Open the folder containing the recent file."""
+        import subprocess
+        folder = os.path.dirname(filepath)
+        if os.path.exists(folder):
+            subprocess.Popen(f'explorer "{folder}"')
+    
+    def _copy_path_to_clipboard(self, filepath: str):
+        """Copy file path to clipboard."""
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        clipboard.setText(filepath)
+    
+    def _remove_from_recents(self, filepath: str):
+        """Remove file from recent files list."""
+        settings = QSettings("TellusConsultoria", "GeoWizard")
+        recent = settings.value("recent_files", [])
+        
+        if filepath in recent:
+            recent.remove(filepath)
+            settings.setValue("recent_files", recent)
+        
+        # Reload the list
+        self._load_recent_files()
     
     def _go_back(self):
         """Go back to welcome page."""
@@ -783,17 +897,57 @@ class ProjectWizard(QDialog):
     # ═══════════════════════════════════════════════════════════════════════════
     
     def _load_recent_files(self):
-        """Load recent files from settings."""
+        """Load recent files from settings with metadata."""
+        from datetime import datetime
+        
         settings = QSettings("TellusConsultoria", "GeoWizard")
         recent = settings.value("recent_files", [])
         
         self.recent_list.clear()
         for filepath in recent:
             if os.path.exists(filepath):
-                item = QListWidgetItem(os.path.basename(filepath))
+                # Get file metadata
+                stat = os.stat(filepath)
+                created = datetime.fromtimestamp(stat.st_ctime)
+                modified = datetime.fromtimestamp(stat.st_mtime)
+                folder = os.path.dirname(filepath)
+                filename = os.path.basename(filepath)
+                
+                # Create custom widget for item
+                item_widget = QWidget()
+                item_layout = QVBoxLayout(item_widget)
+                item_layout.setContentsMargins(2, 4, 2, 4)  # Reduced left margin
+                item_layout.setSpacing(1)
+                
+                # Filename (bold)
+                name_label = QLabel(f"<b>{filename}</b>")
+                name_label.setStyleSheet("color: #2c3e50; font-size: 10pt;")
+                name_label.setWordWrap(True)
+                item_layout.addWidget(name_label)
+                
+                # Location (path only, no label)
+                loc_label = QLabel(folder)
+                loc_label.setStyleSheet("color: #7f8c8d; font-size: 8pt;")
+                loc_label.setWordWrap(True)
+                item_layout.addWidget(loc_label)
+                
+                # Dates (compact format)
+                date_label = QLabel(
+                    f"Creado: {created.strftime('%d/%m/%Y %H:%M')}  ·  "
+                    f"Modificado: {modified.strftime('%d/%m/%Y %H:%M')}"
+                )
+                date_label.setStyleSheet("color: #95a5a6; font-size: 8pt;")
+                date_label.setWordWrap(True)
+                item_layout.addWidget(date_label)
+                
+                # Create list item with proper size
+                item = QListWidgetItem()
                 item.setData(Qt.UserRole, filepath)
                 item.setToolTip(filepath)
+                item.setSizeHint(item_widget.sizeHint())
+                
                 self.recent_list.addItem(item)
+                self.recent_list.setItemWidget(item, item_widget)
         
         if self.recent_list.count() == 0:
             item = QListWidgetItem("(No hay archivos recientes)")
@@ -843,6 +997,38 @@ class ProjectWizard(QDialog):
             # Output folder - use original location
             self.txt_output_folder.setText(os.path.dirname(filepath))
             
+            # Store map preview if available (for existing projects)
+            map_preview = data.get("map_preview", None)
+            if map_preview:
+                self._map_preview_base64 = map_preview
+            
+            # Extract geometries for Leaflet map preview
+            vertices = data.get("vertices", [])
+            self._preview_geometries = []
+            if vertices:
+                # Build geometry from vertices (assume polygon if > 2 points)
+                coords = []
+                for v in vertices:
+                    geo = v.get("coordenadas", {}).get("geograficas_dd", {})
+                    if geo and geo.get("lat") and geo.get("lon"):
+                        coords.append({
+                            "lat": geo["lat"],
+                            "lon": geo["lon"],
+                            "id": v.get("id", "")
+                        })
+                
+                if len(coords) > 2:
+                    self._preview_geometries = [{
+                        "type": "polygon",
+                        "coordinates": coords
+                    }]
+                elif len(coords) == 1:
+                    self._preview_geometries = [{
+                        "type": "point",
+                        "lat": coords[0]["lat"],
+                        "lon": coords[0]["lon"]
+                    }]
+            
             logger.info(f"Loaded project from: {filepath}")
             
         except Exception as e:
@@ -850,7 +1036,11 @@ class ProjectWizard(QDialog):
     
     def _collect_project_data(self) -> dict:
         """Collect all form data into a dictionary."""
-        code = self.lbl_code_preview.text()
+        # Build code from input fields
+        prefix = self.txt_code_prefix.text() or "GWZ"
+        number = f"{self.spin_code_number.value():02d}"
+        suffix = self.txt_code_suffix.text() or "UBI"
+        code = f"{prefix}-{number}-{suffix}"
         
         self._project_data = {
             # Project info
@@ -913,15 +1103,20 @@ class ProjectWizard(QDialog):
         else:
             self.preview_web.setHtml("<html><body><h2>Vista previa no disponible</h2></body></html>")
     
-    def _update_preview(self):
+    def _update_preview(self, map_image_base64: str = None):
         """Update preview with current form values."""
         # Get fecha_larga formatted
         fecha_larga = self.date_fecha.date().toString("dddd, d 'de' MMMM 'de' yyyy")
         coord_system = self.cb_coord_system.currentText()
         
+        # Build code from fields
+        prefix = self.txt_code_prefix.text() or "GWZ"
+        number = f"{self.spin_code_number.value():02d}"
+        suffix = self.txt_code_suffix.text() or "UBI"
+        codigo = f"{prefix}-{number}-{suffix}"
+        
         # Escape quotes in strings for JavaScript
         titulo = self.txt_titulo.text().replace('"', '\\"').replace("'", "\\'")
-        codigo = self.lbl_code_preview.text()
         subtitulo = self.txt_subtitulo.text().replace('"', '\\"').replace("'", "\\'")
         promovente = self.txt_promovente.text().replace('"', '\\"').replace("'", "\\'")
         responsable = self.txt_responsable.text().replace('"', '\\"').replace("'", "\\'")
@@ -929,6 +1124,19 @@ class ProjectWizard(QDialog):
         dibujante = self.txt_dibujante.text()
         reviso = self.txt_reviso.text()  # Will be empty in Free version
         aprobo = self.txt_aprobo.text()  # Will be empty in Free version
+        
+        # Use provided map image or stored one (format as data URI only if valid)
+        map_image = map_image_base64 or getattr(self, '_map_preview_base64', None)
+        # Only create data URI if we have actual base64 content (not empty/None)
+        if map_image and len(str(map_image)) > 100:  # Valid base64 should be substantial
+            map_data_uri = f"data:image/png;base64,{map_image}"
+        else:
+            map_data_uri = ""
+        
+        # Get geometries for Leaflet map
+        import json
+        geometries = getattr(self, '_preview_geometries', [])
+        geometries_json = json.dumps(geometries)
         
         # Build JavaScript to update the template
         js = f"""
@@ -944,7 +1152,9 @@ class ProjectWizard(QDialog):
                 dibujante: "{dibujante}",
                 reviso: "{reviso}",
                 aprobo: "{aprobo}",
-                coord_system: "{coord_system}"
+                coord_system: "{coord_system}",
+                mapa_imagen: "{map_data_uri}" || null,
+                geometries: {geometries_json}
             }});
         }}
         """

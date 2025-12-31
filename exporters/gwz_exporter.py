@@ -81,7 +81,9 @@ class GWZExporter:
         hemisphere: str,
         coord_system: str,
         measurements: Optional[Dict[str, float]] = None,
-        project_data: Optional[Dict[str, Any]] = None
+        project_data: Optional[Dict[str, Any]] = None,
+        selected_geometries: Optional[List[str]] = None,
+        map_preview_base64: Optional[str] = None
     ) -> bool:
         """
         Export table data to GWZ format.
@@ -94,6 +96,8 @@ class GWZExporter:
             coord_system: Current coordinate system in use
             measurements: Optional dict with area, perimeter, distance values
             project_data: Optional dict with wizard project data (titulo, codigo, etc.)
+            selected_geometries: Optional list of selected geometry IDs
+            map_preview_base64: Optional base64-encoded map preview image
             
         Returns:
             True if export successful, False otherwise
@@ -111,7 +115,9 @@ class GWZExporter:
                 },
                 "project_data": project_data or {},
                 "vertices": [],
-                "mediciones": measurements or {}
+                "mediciones": measurements or {},
+                "selected_geometries": selected_geometries or [],
+                "map_preview": map_preview_base64
             }
             
             # Get curve rows set

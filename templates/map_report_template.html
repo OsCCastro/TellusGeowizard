@@ -5,6 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reporte de Mapa - GeoWizard</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
@@ -52,12 +56,23 @@
         .map-placeholder {
             width: 100%;
             height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            position: relative;
             background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);
             color: #dfe6e9;
             font-size: 14pt;
+        }
+
+        #leafletMap {
+            position: absolute !important;
+            top: 0;
+            left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 1;
+        }
+
+        .leaflet-container {
+            background: transparent !important;
         }
 
         /* Coordinate grid labels */
@@ -471,9 +486,12 @@
         <!-- MAIN MAP AREA -->
         <!-- ═══════════════════════════════════════════════════════ -->
         <div class="map-container">
-            <!-- Map image will be injected here -->
+            <!-- Interactive Leaflet map or placeholder -->
             <div class="map-placeholder" id="mapPlaceholder">
-                [IMAGEN DEL MAPA]
+                <div id="leafletMap" style="width: 100%; height: 100%;"></div>
+                <div id="mapFallbackText"
+                    style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #dfe6e9; font-size: 14pt;">
+                    [IMAGEN DEL MAPA]</div>
             </div>
 
             <!-- Coordinate labels (will be populated dynamically) -->
@@ -802,8 +820,8 @@
                 });
             }
 
-            // Set map image
-            if (data.mapa_imagen) {
+            // Set map image (only if valid data URI)
+            if (data.mapa_imagen && data.mapa_imagen.startsWith('data:image')) {
                 const placeholder = document.getElementById('mapPlaceholder');
                 placeholder.innerHTML = `<img src="${data.mapa_imagen}" class="map-image" alt="Mapa">`;
             }
@@ -812,6 +830,91 @@
             if (data.mapa_ubicacion) {
                 const locMap = document.getElementById('locationMap');
                 locMap.innerHTML = `<img src="${data.mapa_ubicacion}" class="location-map-img" alt="Ubicación">`;
+            }
+
+            // Initialize Leaflet map with geometries
+            if (data.geometries && data.geometries.length > 0) {
+                initializeLeafletMap(data.geometries);
+            }
+        }
+
+        // Leaflet map instance
+        let previewMap = null;
+        let geometryLayer = null;
+
+        function initializeLeafletMap(geometries) {
+            const mapContainer = document.getElementById('leafletMap');
+            if (!mapContainer) return;
+
+            // Hide fallback text
+            const fallback = document.getElementById('mapFallbackText');
+            if (fallback) fallback.style.display = 'none';
+
+            // Remove existing map if any
+            if (previewMap) {
+                previewMap.remove();
+                previewMap = null;
+            }
+
+            // Initialize map
+            previewMap = L.map('leafletMap', {
+                zoomControl: true,
+                attributionControl: false
+            });
+
+            // Add tile layer (satellite/streets)
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19
+            }).addTo(previewMap);
+
+            // Create feature group
+            geometryLayer = L.featureGroup().addTo(previewMap);
+
+            // Style for geometries
+            const polygonStyle = {
+                color: '#0078d7',
+                weight: 2,
+                fillColor: '#0078d7',
+                fillOpacity: 0.2
+            };
+
+            const pointStyle = {
+                radius: 6,
+                fillColor: '#e74c3c',
+                color: '#fff',
+                weight: 2,
+                fillOpacity: 0.9
+            };
+
+            // Add geometries
+            geometries.forEach(geom => {
+                if (geom.type === 'polygon' && geom.coordinates && geom.coordinates.length > 2) {
+                    const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
+                    L.polygon(latLngs, polygonStyle).addTo(geometryLayer);
+                    // Add vertex markers
+                    geom.coordinates.forEach((c, idx) => {
+                        L.circleMarker([c.lat, c.lon], {
+                            radius: 4,
+                            fillColor: '#fff',
+                            color: '#333',
+                            weight: 2,
+                            fillOpacity: 1
+                        }).addTo(geometryLayer);
+                    });
+                } else if (geom.type === 'point' && geom.lat && geom.lon) {
+                    L.circleMarker([geom.lat, geom.lon], pointStyle).addTo(geometryLayer);
+                } else if (geom.type === 'line' && geom.coordinates && geom.coordinates.length > 1) {
+                    const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
+                    L.polyline(latLngs, { color: '#0078d7', weight: 3 }).addTo(geometryLayer);
+                }
+            });
+
+            // Fit map to geometries
+            if (geometryLayer.getLayers().length > 0) {
+                previewMap.fitBounds(geometryLayer.getBounds().pad(0.1));
+            } else {
+                // Default view (Mexico)
+                previewMap.setView([23.6345, -102.5528], 5);
             }
         }
 

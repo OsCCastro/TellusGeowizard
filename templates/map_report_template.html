@@ -5,10 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reporte de Mapa - GeoWizard</title>
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet CSS (Local) -->
+    <link rel="stylesheet" href="../leaflet/leaflet.css" />
+    <!-- Leaflet JS (Local) -->
+    <script src="../leaflet/leaflet.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
 
@@ -490,8 +490,11 @@
             <div class="map-placeholder" id="mapPlaceholder">
                 <div id="leafletMap" style="width: 100%; height: 100%;"></div>
                 <div id="mapFallbackText"
-                    style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #dfe6e9; font-size: 14pt;">
-                    [IMAGEN DEL MAPA]</div>
+                    style="display: flex; position: absolute; top: 0; left: 0; width: 100%; height: 100%; align-items: center; justify-content: center; flex-direction: column; gap: 10px; color: #dfe6e9; font-size: 14pt; background: linear-gradient(135deg, #2d3436 0%, #636e72 100%);">
+                    <div style="font-size: 48px;">🗺️</div>
+                    <div>[IMAGEN DEL MAPA]</div>
+                    <div style="font-size: 10pt; color: #b2bec3;">El mapa se generará al guardar el proyecto</div>
+                </div>
             </div>
 
             <!-- Coordinate labels (will be populated dynamically) -->
@@ -843,8 +846,30 @@
         let geometryLayer = null;
 
         function initializeLeafletMap(geometries) {
+            console.log('[GeoWizard] Iniciando mapa Leaflet con', geometries ? geometries.length : 0, 'geometrías');
+
             const mapContainer = document.getElementById('leafletMap');
-            if (!mapContainer) return;
+            if (!mapContainer) {
+                console.error('[GeoWizard] Contenedor #leafletMap no encontrado');
+                return;
+            }
+
+            // Verificar que Leaflet esté cargado
+            if (typeof L === 'undefined') {
+                console.error('[GeoWizard] Leaflet (L) no está cargado - mostrando fallback');
+                const fallback = document.getElementById('mapFallbackText');
+                if (fallback) fallback.style.display = 'flex';
+                return;
+            }
+
+            // Verificar dimensiones del contenedor
+            const rect = mapContainer.getBoundingClientRect();
+            console.log('[GeoWizard] Dimensiones del contenedor:', rect.width, 'x', rect.height);
+
+            if (rect.height === 0) {
+                console.warn('[GeoWizard] Contenedor tiene altura 0, estableciendo mínimo');
+                mapContainer.style.minHeight = '400px';
+            }
 
             // Hide fallback text
             const fallback = document.getElementById('mapFallbackText');
@@ -852,69 +877,95 @@
 
             // Remove existing map if any
             if (previewMap) {
+                console.log('[GeoWizard] Removiendo mapa existente');
                 previewMap.remove();
                 previewMap = null;
             }
 
-            // Initialize map
-            previewMap = L.map('leafletMap', {
-                zoomControl: true,
-                attributionControl: false
-            });
+            try {
+                // Initialize map
+                console.log('[GeoWizard] Creando instancia de mapa Leaflet');
+                previewMap = L.map('leafletMap', {
+                    zoomControl: true,
+                    attributionControl: false
+                });
 
-            // Add tile layer (satellite/streets)
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 19
-            }).addTo(previewMap);
+                // Add tile layer (satellite/streets)
+                console.log('[GeoWizard] Agregando capa de tiles');
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19
+                }).addTo(previewMap);
 
-            // Create feature group
-            geometryLayer = L.featureGroup().addTo(previewMap);
+                // Create feature group
+                geometryLayer = L.featureGroup().addTo(previewMap);
 
-            // Style for geometries
-            const polygonStyle = {
-                color: '#0078d7',
-                weight: 2,
-                fillColor: '#0078d7',
-                fillOpacity: 0.2
-            };
+                // Style for geometries
+                const polygonStyle = {
+                    color: '#0078d7',
+                    weight: 2,
+                    fillColor: '#0078d7',
+                    fillOpacity: 0.2
+                };
 
-            const pointStyle = {
-                radius: 6,
-                fillColor: '#e74c3c',
-                color: '#fff',
-                weight: 2,
-                fillOpacity: 0.9
-            };
+                const pointStyle = {
+                    radius: 6,
+                    fillColor: '#e74c3c',
+                    color: '#fff',
+                    weight: 2,
+                    fillOpacity: 0.9
+                };
 
-            // Add geometries
-            geometries.forEach(geom => {
-                if (geom.type === 'polygon' && geom.coordinates && geom.coordinates.length > 2) {
-                    const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
-                    L.polygon(latLngs, polygonStyle).addTo(geometryLayer);
-                    // Add vertex markers
-                    geom.coordinates.forEach((c, idx) => {
-                        L.circleMarker([c.lat, c.lon], {
-                            radius: 4,
-                            fillColor: '#fff',
-                            color: '#333',
-                            weight: 2,
-                            fillOpacity: 1
-                        }).addTo(geometryLayer);
+                // Add geometries
+                if (geometries && Array.isArray(geometries)) {
+                    console.log('[GeoWizard] Procesando', geometries.length, 'geometrías');
+                    geometries.forEach((geom, idx) => {
+                        if (geom.type === 'polygon' && geom.coordinates && geom.coordinates.length > 2) {
+                            const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
+                            L.polygon(latLngs, polygonStyle).addTo(geometryLayer);
+                            console.log('[GeoWizard] Agregado polígono con', latLngs.length, 'vértices');
+                            // Add vertex markers
+                            geom.coordinates.forEach((c, idx) => {
+                                L.circleMarker([c.lat, c.lon], {
+                                    radius: 4,
+                                    fillColor: '#fff',
+                                    color: '#333',
+                                    weight: 2,
+                                    fillOpacity: 1
+                                }).addTo(geometryLayer);
+                            });
+                        } else if (geom.type === 'point' && geom.lat && geom.lon) {
+                            L.circleMarker([geom.lat, geom.lon], pointStyle).addTo(geometryLayer);
+                            console.log('[GeoWizard] Agregado punto en', geom.lat, geom.lon);
+                        } else if (geom.type === 'line' && geom.coordinates && geom.coordinates.length > 1) {
+                            const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
+                            L.polyline(latLngs, { color: '#0078d7', weight: 3 }).addTo(geometryLayer);
+                            console.log('[GeoWizard] Agregada polilínea con', latLngs.length, 'puntos');
+                        }
                     });
-                } else if (geom.type === 'point' && geom.lat && geom.lon) {
-                    L.circleMarker([geom.lat, geom.lon], pointStyle).addTo(geometryLayer);
-                } else if (geom.type === 'line' && geom.coordinates && geom.coordinates.length > 1) {
-                    const latLngs = geom.coordinates.map(c => [c.lat, c.lon]);
-                    L.polyline(latLngs, { color: '#0078d7', weight: 3 }).addTo(geometryLayer);
                 }
-            });
 
-            // Fit map to geometries
-            if (geometryLayer.getLayers().length > 0) {
-                previewMap.fitBounds(geometryLayer.getBounds().pad(0.1));
-            } else {
-                // Default view (Mexico)
-                previewMap.setView([23.6345, -102.5528], 5);
+                // Fit map to geometries
+                if (geometryLayer.getLayers().length > 0) {
+                    console.log('[GeoWizard] Ajustando vista a', geometryLayer.getLayers().length, 'elementos');
+                    previewMap.fitBounds(geometryLayer.getBounds().pad(0.1));
+                } else {
+                    console.log('[GeoWizard] Sin geometrías, usando vista por defecto');
+                    // Default view (Mexico)
+                    previewMap.setView([23.6345, -102.5528], 5);
+                }
+
+                console.log('[GeoWizard] Mapa inicializado correctamente');
+            } catch (error) {
+                console.error('[GeoWizard] Error al inicializar mapa:', error);
+                const fallback = document.getElementById('mapFallbackText');
+                if (fallback) {
+                    fallback.style.display = 'flex';
+                    fallback.innerHTML = `
+                        <div style="font-size: 48px;">⚠️</div>
+                        <div>Error al cargar mapa</div>
+                        <div style="font-size: 10pt; color: #b2bec3;">${error.message}</div>
+                    `;
+                }
             }
         }
 

@@ -722,9 +722,9 @@ class ProjectWizard(QDialog):
                 self._source_file = filename
                 self._load_existing_project(filename)
                 self.stack.setCurrentIndex(1)
-                # Delay preview update to let page load
+                # Delay preview update to let page load completely
                 from PySide6.QtCore import QTimer
-                QTimer.singleShot(500, self._update_preview)
+                QTimer.singleShot(800, self._update_preview)
                 
         elif action.startswith('new_'):
             # Open file dialog for specific format
@@ -1099,7 +1099,30 @@ class ProjectWizard(QDialog):
         template_path = os.path.join(base_path, "templates", "map_report_template.html")
         
         if os.path.exists(template_path):
-            self.preview_web.setUrl(QUrl.fromLocalFile(template_path))
+            # Read the template content
+            with open(template_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            
+            # Generate absolute paths for Leaflet files
+            leaflet_css_path = os.path.join(base_path, "leaflet", "leaflet.css").replace('\\', '/')
+            leaflet_js_path = os.path.join(base_path, "leaflet", "leaflet.js").replace('\\', '/')
+            
+            # Convert to file:// URLs
+            leaflet_css_url = QUrl.fromLocalFile(leaflet_css_path).toString()
+            leaflet_js_url = QUrl.fromLocalFile(leaflet_js_path).toString()
+            
+            # Replace relative paths with absolute file:// URLs
+            html_content = html_content.replace('href="../leaflet/leaflet.css"', f'href="{leaflet_css_url}"')
+            html_content = html_content.replace('src="../leaflet/leaflet.js"', f'src="{leaflet_js_url}"')
+            
+            # Set the base URL to the template directory so other relative resources work
+            base_url = QUrl.fromLocalFile(os.path.dirname(template_path) + "/")
+            
+            # Load the modified HTML
+            self.preview_web.setHtml(html_content, base_url)
+            
+            logger.info(f"Template loaded with Leaflet CSS: {leaflet_css_url}")
+            logger.info(f"Template loaded with Leaflet JS: {leaflet_js_url}")
         else:
             self.preview_web.setHtml("<html><body><h2>Vista previa no disponible</h2></body></html>")
     
@@ -1138,9 +1161,25 @@ class ProjectWizard(QDialog):
         geometries = getattr(self, '_preview_geometries', [])
         geometries_json = json.dumps(geometries)
         
-        # Build JavaScript to update the template
+        # Build JavaScript to update the template with verification
         js = f"""
-        if (typeof populateTemplate === 'function') {{
+        (function() {{
+            // Verificar que Leaflet esté cargado
+            if (typeof L === 'undefined') {{
+                console.error('[GeoWizard Preview] Leaflet (L) no está definido');
+                var fallback = document.getElementById('mapFallbackText');
+                if (fallback) fallback.style.display = 'flex';
+                return;
+            }}
+            
+            // Verificar que populateTemplate esté disponible
+            if (typeof populateTemplate !== 'function') {{
+                console.error('[GeoWizard Preview] populateTemplate no está disponible');
+                return;
+            }}
+            
+            console.log('[GeoWizard Preview] Actualizando preview con ' + {len(geometries)} + ' geometrías');
+            
             populateTemplate({{
                 proyecto_titulo: "{titulo}",
                 codigo: "{codigo}",
@@ -1156,9 +1195,16 @@ class ProjectWizard(QDialog):
                 mapa_imagen: "{map_data_uri}" || null,
                 geometries: {geometries_json}
             }});
-        }}
+        }})();
         """
-        self.preview_web.page().runJavaScript(js)
+        
+        # Execute JavaScript after ensuring page is loaded
+        def run_js():
+            self.preview_web.page().runJavaScript(js)
+        
+        # Use QTimer to ensure WebEngine is ready
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(150, run_js)
     
     def _zoom_in_preview(self):
         """Zoom in the preview."""
